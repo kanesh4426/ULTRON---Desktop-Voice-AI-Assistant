@@ -1,0 +1,6 @@
+assistant:
+  provider: groq
+  model: llama-3.3-70b-versatile
+  rag_store_path: data/rag_index
+  rag_top_k: 6
+  timeout_sec: 45

@@ -1,0 +1,15 @@
+Pillow
+python-dotenv
+edge-tts
+google
+httpx
+numpy
+openai
+pollinations
+psutil
+pygame
+scikit-learn
+SpeechRecognition
+PySide6
+winapps
+AppOpener

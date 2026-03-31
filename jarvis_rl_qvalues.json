@@ -1,0 +1,44 @@
+{
+  "very_short_long_hist": {
+    "normal": 0.7832,
+    "concise": 0.668343,
+    "detailed": 0.88,
+    "technical": 1.0,
+    "friendly": 1.0
+  },
+  "short_long_hist": {
+    "normal": 0.9199999999999999,
+    "concise": 0.8103,
+    "detailed": 0.8103,
+    "technical": 1.0,
+    "friendly": 1.0
+  },
+  "long_long_hist": {
+    "normal": 0.9199999999999999,
+    "concise": 0.93,
+    "detailed": 0.93,
+    "technical": 1.0,
+    "friendly": 1.0
+  },
+  "medium_long_hist": {
+    "normal": 0.848,
+    "concise": 0.93,
+    "detailed": 0.93,
+    "technical": 1.0,
+    "friendly": 1.0
+  },
+  "short_short_hist": {
+    "normal": 0.9199999999999999,
+    "concise": 0.93,
+    "detailed": 0.93,
+    "technical": 1.0,
+    "friendly": 1.0
+  },
+  "very_short_short_hist": {
+    "normal": 0.9199999999999999,
+    "concise": 0.93,
+    "detailed": 0.88,
+    "technical": 1.0,
+    "friendly": 1.0
+  }
+}

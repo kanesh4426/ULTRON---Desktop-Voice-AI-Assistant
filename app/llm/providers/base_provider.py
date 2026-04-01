@@ -7,6 +7,24 @@ class BaseLLMProvider(ABC):
         self.api_key = api_key
         self.timeout = timeout
 
+    @staticmethod
+    def messages_from_prompt(prompt: str) -> List[Dict[str, str]]:
+        return [{"role": "user", "content": prompt}]
+
+    def generate_prompt(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float = 0.3,
+        max_tokens: int = 1200,
+    ) -> str:
+        return self.generate(
+            messages=self.messages_from_prompt(prompt),
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
     @abstractmethod
     def generate(
         self,
@@ -24,8 +42,6 @@ class BaseLLMProvider(ABC):
         temperature: float = 0.3,
         max_tokens: int = 1200,
     ) -> AsyncIterator[str]:
-        # Default fallback if provider has no native stream endpoint.
         text = self.generate(messages, model=model, temperature=temperature, max_tokens=max_tokens)
         for token in text.split(" "):
             yield token + " "
-

@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncIterator, Callable, Dict, List
+from typing import Callable, Dict, List
 
 
 class ResponseStreamer:
@@ -24,3 +24,16 @@ class ResponseStreamer:
             await asyncio.sleep(0)
         return "".join(parts)
 
+    async def stream_text(
+        self,
+        text: str,
+        on_token: Callable[[str], None],
+        chunk_size: int = 48,
+    ) -> str:
+        if not text:
+            return ""
+        for start in range(0, len(text), chunk_size):
+            chunk = text[start : start + chunk_size]
+            on_token(chunk)
+            await asyncio.sleep(0)
+        return text

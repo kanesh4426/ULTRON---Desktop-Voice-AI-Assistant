@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import sys
 import subprocess
@@ -16,15 +16,15 @@ try:
     )
     DEBUGGER_AVAILABLE = True
 except ImportError:
-    print("⚠️  Code debugger module not found. Debugging features disabled.")
+    print("âš ï¸  Code debugger module not found. Debugging features disabled.")
     DEBUGGER_AVAILABLE = False
 
 # Import ContentGenerator module
 try:
-    from app.agents.roles.content_generator import generate_content
+    from content_generation import generate_content
     CONTENT_GEN_AVAILABLE = True
 except ImportError:
-    print("⚠️  Content generator module not found. Content generation features disabled.")
+    print("âš ï¸  Content generator module not found. Content generation features disabled.")
     CONTENT_GEN_AVAILABLE = False
 
 # Import local_file_access module
@@ -119,16 +119,16 @@ try:
             return self.manager.is_dir(path)
 
 except ImportError:
-    print("⚠️  local_file_access module not found. File operations disabled.")
+    print("âš ï¸  local_file_access module not found. File operations disabled.")
     FILE_ACCESSOR_AVAILABLE = False
 
 # Import AppController module for application control
 try:
     from app.services.app_service import AppController, open_app, close_app, process_command, is_app_running
     APP_CONTROLLER_AVAILABLE = True
-    print("✅ AppController imported successfully")
+    print("âœ… AppController imported successfully")
 except ImportError as e:
-    print(f"⚠️  AppController import failed: {e}")
+    print(f"âš ï¸  AppController import failed: {e}")
     # Create fallback dummy functions
     class DummyAppController:
         def open_application(self, app_name): 
@@ -172,7 +172,7 @@ class JARVISAI:
                 raise ValueError("No API key found for CodeGenerator")
             self.codegen = CodeGenerator(api_key=api_key)
         except ImportError:
-            print("❌ CodeGenerator module not found. Code generation features disabled.")
+            print("âŒ CodeGenerator module not found. Code generation features disabled.")
             self.codegen = None
 
         # Initialize file accessor if available
@@ -196,7 +196,7 @@ class JARVISAI:
             if not self.api_key:
                 raise ValueError("GROQ_API_KEY not found in environment variables or provided parameter")
         except Exception as e:
-            print(f"❌ Failed to load environment: {e}")
+            print(f"âŒ Failed to load environment: {e}")
             sys.exit(1)
             
     def initialize_client(self):
@@ -207,7 +207,7 @@ class JARVISAI:
                 api_key=self.api_key
             )
         except Exception as e:
-            print(f"❌ Failed to initialize API client: {e}")
+            print(f"âŒ Failed to initialize API client: {e}")
             sys.exit(1)
             
     def setup_conversation_context(self):
@@ -250,7 +250,7 @@ class JARVISAI:
             },
             {
                 "role": "system", 
-                "content": "Application control examples:\n- 'open chrome' → Uses AppController\n- 'open https://google.com' → Uses AppController\n- 'close chrome' → Uses AppController"
+                "content": "Application control examples:\n- 'open chrome' â†’ Uses AppController\n- 'open https://google.com' â†’ Uses AppController\n- 'close chrome' â†’ Uses AppController"
             },
             # Examples for better context
             {
@@ -603,11 +603,11 @@ class JARVISAI:
             str: Result message
         """
         if not APP_CONTROLLER_AVAILABLE:
-            return "❌ Application control not available. Install AppController module."
+            return "âŒ Application control not available. Install AppController module."
         
         parts = command.split()
         if len(parts) < 2:
-            return "❌ Usage: app [operation] [arguments...]"
+            return "âŒ Usage: app [operation] [arguments...]"
         
         operation = parts[1].lower()
         args = parts[2:]
@@ -615,7 +615,7 @@ class JARVISAI:
         try:
             if operation == 'open':
                 if len(args) < 1:
-                    return "❌ Usage: app open [app_name/url] [browser?]"
+                    return "âŒ Usage: app open [app_name/url] [browser?]"
                 
                 target = args[0]
                 browser = args[1] if len(args) > 1 else 'default'
@@ -628,40 +628,40 @@ class JARVISAI:
                     
             elif operation == 'close':
                 if len(args) < 1:
-                    return "❌ Usage: app close [app_name]"
+                    return "âŒ Usage: app close [app_name]"
                 result = self.app_control('close_application', args[0])
                 
             elif operation == 'status':
                 if len(args) < 1:
-                    return "❌ Usage: app status [app_name]"
+                    return "âŒ Usage: app status [app_name]"
                 result = self.app_control('is_running', args[0])
                 
             elif operation == 'list':
                 result = self.app_control('list_apps')
                 
             else:
-                return f"❌ Unknown app operation: {operation}"
+                return f"âŒ Unknown app operation: {operation}"
             
             # Format result
             if result['success']:   
                 if operation == 'status':
-                    status = "✅ Running" if result['running'] else "❌ Not running"
+                    status = "âœ… Running" if result['running'] else "âŒ Not running"
                     return f"{status} - {result['app']} ({result['process_count']} processes)"
                 elif operation == 'list':
                     apps = result['applications']
-                    output = f"📱 Running applications ({result['count']}):\n"
+                    output = f"ðŸ“± Running applications ({result['count']}):\n"
                     for app in apps[:10]:  # Show first 10
-                        output += f"• {app['name']} (PID: {app['pid']})\n"
+                        output += f"â€¢ {app['name']} (PID: {app['pid']})\n"
                     if result['count'] > 10:
                         output += f"... and {result['count'] - 10} more"
                     return output
                 else:
-                    return f"✅ {result['message']}"
+                    return f"âœ… {result['message']}"
             else:
-                return f"❌ {result['error']}"
+                return f"âŒ {result['error']}"
                 
         except Exception as e:
-            return f"❌ Error executing app command: {str(e)}"
+            return f"âŒ Error executing app command: {str(e)}"
     
     # File Operations Methods
     def file_operations(self, operation: str, *args, **kwargs) -> Dict[str, Any]:
@@ -727,11 +727,11 @@ class JARVISAI:
             str: Result message
         """
         if not FILE_ACCESSOR_AVAILABLE:
-            return "❌ File operations not available. Install LocalFileAccessor module."
+            return "âŒ File operations not available. Install LocalFileAccessor module."
         
         parts = command.split()
         if len(parts) < 2:
-            return "❌ Usage: file [operation] [arguments...]"
+            return "âŒ Usage: file [operation] [arguments...]"
         
         operation = parts[1].lower()
         args = parts[2:]
@@ -739,44 +739,44 @@ class JARVISAI:
         try:
             if operation == 'create':
                 if len(args) < 1:
-                    return "❌ Usage: file create [filename] [content?]"
+                    return "âŒ Usage: file create [filename] [content?]"
                 content = ' '.join(args[1:]) if len(args) > 1 else ""
                 result = self.file_operations('create_file', args[0], content)
                 
             elif operation == 'read':
                 if len(args) < 1:
-                    return "❌ Usage: file read [filename]"
+                    return "âŒ Usage: file read [filename]"
                 result = self.file_operations('read_file', args[0])
                 
             elif operation == 'delete':
                 if len(args) < 1:
-                    return "❌ Usage: file delete [filename]"
+                    return "âŒ Usage: file delete [filename]"
                 result = self.file_operations('delete_file', args[0])
                 
             elif operation == 'mkdir':
                 if len(args) < 1:
-                    return "❌ Usage: file mkdir [foldername]"
+                    return "âŒ Usage: file mkdir [foldername]"
                 result = self.file_operations('create_folder', args[0])
                 
             elif operation == 'rmdir':
                 if len(args) < 1:
-                    return "❌ Usage: file rmdir [foldername]"
+                    return "âŒ Usage: file rmdir [foldername]"
                 recursive = '--recursive' in args or '-r' in args
                 result = self.file_operations('delete_folder', args[0], recursive)
                 
             elif operation == 'rename':
                 if len(args) < 2:
-                    return "❌ Usage: file rename [oldname] [newname]"
+                    return "âŒ Usage: file rename [oldname] [newname]"
                 result = self.file_operations('rename', args[0], args[1])
                 
             elif operation == 'move':
                 if len(args) < 2:
-                    return "❌ Usage: file move [source] [destination]"
+                    return "âŒ Usage: file move [source] [destination]"
                 result = self.file_operations('move', args[0], args[1])
                 
             elif operation == 'copy':
                 if len(args) < 2:
-                    return "❌ Usage: file copy [source] [destination]"
+                    return "âŒ Usage: file copy [source] [destination]"
                 result = self.file_operations('copy', args[0], args[1])
                 
             elif operation == 'list':
@@ -786,12 +786,12 @@ class JARVISAI:
                 
             elif operation == 'info':
                 if len(args) < 1:
-                    return "❌ Usage: file info [path]"
+                    return "âŒ Usage: file info [path]"
                 result = self.file_operations('get_file_info', args[0])
                 
             elif operation == 'search':
                 if len(args) < 1:
-                    return "❌ Usage: file search [pattern] [path?]"
+                    return "âŒ Usage: file search [pattern] [path?]"
                 pattern = args[0]
                 path = args[1] if len(args) > 1 else "."
                 recursive = not ('--no-recursive' in args or '-n' in args)
@@ -799,40 +799,40 @@ class JARVISAI:
                 
             elif operation == 'exists':
                 if len(args) < 1:
-                    return "❌ Usage: file exists [path]"
+                    return "âŒ Usage: file exists [path]"
                 result = self.file_accessor.file_exists(args[0])
-                return f"✅ Path exists: {result}"
+                return f"âœ… Path exists: {result}"
                 
             else:
-                return f"❌ Unknown file operation: {operation}"
+                return f"âŒ Unknown file operation: {operation}"
             
             # Format the result
             if result['success']:
                 if operation == 'read':
-                    return f"✅ File content:\n{result['content']}"
+                    return f"âœ… File content:\n{result['content']}"
                 elif operation == 'list':
                     items = result['items']
-                    output = f"📁 Directory listing ({result['count']} items):\n"
+                    output = f"ðŸ“ Directory listing ({result['count']} items):\n"
                     for item in items:
-                        icon = "📄" if item['is_file'] else "📁"
+                        icon = "ðŸ“„" if item['is_file'] else "ðŸ“"
                         output += f"{icon} {item['name']} ({item['size']} bytes)\n"
                     return output
                 elif operation == 'info':
                     info = result
-                    return f"📋 File info:\nName: {info['name']}\nPath: {info['path']}\nSize: {info['size']} bytes\nType: {'File' if info['is_file'] else 'Directory'}\nModified: {info['modified']}"
+                    return f"ðŸ“‹ File info:\nName: {info['name']}\nPath: {info['path']}\nSize: {info['size']} bytes\nType: {'File' if info['is_file'] else 'Directory'}\nModified: {info['modified']}"
                 elif operation == 'search':
                     matches = result['matches']
-                    output = f"🔍 Search results ({result['count']} matches):\n"
+                    output = f"ðŸ” Search results ({result['count']} matches):\n"
                     for match in matches:
-                        output += f"• {match}\n"
+                        output += f"â€¢ {match}\n"
                     return output
                 else:
-                    return f"✅ {result['message']}"
+                    return f"âœ… {result['message']}"
             else:
-                return f"❌ {result['error']}"
+                return f"âŒ {result['error']}"
                 
         except Exception as e:
-            return f"❌ Error executing file operation: {str(e)}"
+            return f"âŒ Error executing file operation: {str(e)}"
     
     def interactive_mode(self):
         """Run Jarvis AI in interactive mode"""
@@ -883,7 +883,7 @@ class JARVISAI:
                 # Handle content generation commands
                 elif user_input.startswith('generate content'):
                     if not CONTENT_GEN_AVAILABLE:
-                        print("❌ Content generation not available. Install required modules.")
+                        print("âŒ Content generation not available. Install required modules.")
                         continue
 
                     parts = user_input.split(':', 1)
@@ -899,29 +899,28 @@ class JARVISAI:
                     # Validate content type
                     valid_types = ["blog", "article", "technical", "creative"]
                     if content_type not in valid_types:
-                        print(f"❌ Invalid content type. Choose from: {', '.join(valid_types)}")
+                        print(f"âŒ Invalid content type. Choose from: {', '.join(valid_types)}")
                         continue
 
                     # Generate content
                     try:
-                        from ContentGenerator import generate_content
                         result = generate_content(prompt, content_type=content_type)
                             
-                        if result:
-                            print("✅ Content generated successfully!")
-                            print(f"📁 Saved to: {result['filepath']}")
+                        if result and result.get("success"):
+                            print("âœ… Content generated successfully!")
+                            print(f"ðŸ“ Saved to: {result['filepath']}")
                             if result.get('quality_issues'):
-                                print("⚠️  Quality notes:", result['quality_issues'])
+                                print("âš ï¸  Quality notes:", result['quality_issues'])
                         else:
-                            print("❌ Content generation failed.")
+                            print("âŒ Content generation failed.")
                         
                     except Exception as e:
-                        print(f"❌ Error generating content: {e}")
+                        print(f"âŒ Error generating content: {e}")
 
                 # Handle debugger commands
                 elif user_input.startswith('debug'):
                     if not DEBUGGER_AVAILABLE:
-                         print("❌ Debugger not available. Install MultiLanguageDebugger module.")
+                         print("âŒ Debugger not available. Install MultiLanguageDebugger module.")
                          continue
                     
                     if user_input == 'debug interactive':
@@ -942,7 +941,7 @@ class JARVISAI:
                             
                             result = self.debug_code(code, language)
                             print(f"Debug results for {language}:")
-                            print(f"Syntax Valid: {'✅' if result.get('syntax_valid', False) else '❌'}")  
+                            print(f"Syntax Valid: {'âœ…' if result.get('syntax_valid', False) else 'âŒ'}")  
 
                             if result.get('syntax_errors'):
                                 for error in result['syntax_errors']:
@@ -952,14 +951,14 @@ class JARVISAI:
                                 print(f"Output: {result['execution_output']}")
                             
                             if result.get('fixed_code'):
-                                print(f"\n🛠️  Fixed Code:")
+                                print(f"\nðŸ› ï¸  Fixed Code:")
                                 print(f"```{result.get('language', '')}")
                                 print(result['fixed_code'])
                                 print("```")    
                         else:
-                            print("❌ Usage: debug: [language] [code]")   
+                            print("âŒ Usage: debug: [language] [code]")   
                     else:
-                        print("❌ Unknown debug command. Use 'debug:', 'debug interactive', or 'debug languages'")               
+                        print("âŒ Unknown debug command. Use 'debug:', 'debug interactive', or 'debug languages'")               
                 # Handle task execution commands
                 elif user_input.startswith('execute:'):
                     task = user_input.replace('execute:', '').strip()
@@ -1027,7 +1026,7 @@ def main():
                 code = ' '.join(sys.argv[2:])
                 results = jarvis.debug_code(code)
                 print(f"Debug results:")
-                print(f"Syntax Valid: {'✅' if results.get('syntax_valid', False) else '❌'}")
+                print(f"Syntax Valid: {'âœ…' if results.get('syntax_valid', False) else 'âŒ'}")
                 if results.get('syntax_errors'):
                     for error in results['syntax_errors']:
                         print(f"Error: {error}")
@@ -1040,7 +1039,7 @@ def main():
                 code = ' '.join(sys.argv[3:])
                 results = jarvis.debug_code(code, language)
                 print(f"Debug results for {language}:")
-                print(f"Syntax Valid: {'✅' if results.get('syntax_valid', False) else '❌'}")
+                print(f"Syntax Valid: {'âœ…' if results.get('syntax_valid', False) else 'âŒ'}")
                 if results.get('syntax_errors'):
                     for error in results['syntax_errors']:
                         print(f"Error: {error}")
@@ -1058,11 +1057,11 @@ def main():
                 # Content generation mode
                 topic = ' '.join(sys.argv[2:])
                 result = generate_content(topic)
-                if result:
+                if result and result.get("success"):
                     print("Content generated and saved successfully.") 
-                    print(f"📁 File: {result['filepath']}")       
+                    print(f"ðŸ“ File: {result['filepath']}")       
                 else:
-                    print("❌ Content generation failed.")
+                    print("âŒ Content generation failed.")
 
             elif mode == "file" and len(sys.argv) > 2:
                 # File operation mode
@@ -1095,7 +1094,7 @@ def main():
             jarvis.interactive_mode()        
          
     except Exception as e:
-        print(f"❌ Failed to initialize JARVIS AI: {e}")
+        print(f"âŒ Failed to initialize JARVIS AI: {e}")
 
 if __name__ == "__main__":
     from pathlib import Path
@@ -1107,3 +1106,6 @@ if __name__ == "__main__":
     from ultron import main as ultron_main
 
     sys.exit(ultron_main(["automation"] + sys.argv[1:]))
+
+
+

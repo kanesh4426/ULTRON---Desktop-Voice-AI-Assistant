@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
 import sys
+# Set the remote debugging port *before* any other Qt modules are imported.
+# This is crucial to ensure the setting is applied correctly.
+os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9222"
+
 import datetime
 from typing import List, Dict, Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, Slot, QUrl
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -21,9 +26,11 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpacerItem,
 )
+from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from app.orchestration.app_controller import AppController
-from app.services.tts import SpeakJARVIS
+from app.services.tts import SpeakJARVIS as SpeakUltron
 from app.services.stt import recognize_speech
 
 
@@ -96,6 +103,77 @@ class UltronController:
 
     def test_connection(self) -> Dict[str, Any]:
         return self.app.test_connection()
+
+
+class PyBridge(QObject):
+    """
+    Bridge object exposed to the React frontend via QWebChannel.
+    """
+    def __init__(self, controller: UltronController, window: QMainWindow, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.window = window
+
+    @Slot(int, int)
+    def move_window(self, x: int, y: int):
+        # Move window based on React global drag calculation
+        self.window.move(x, y)
+
+    @Slot(str, result=str)
+    def process_message(self, message: str) -> str:
+        if message == "Status Check from React!":
+            health = self.controller.test_connection()
+            ok = health.get("ok", False)
+            return f"Connection OK: {health.get('message', '')}" if ok else "Connection Failed"
+        
+        try:
+            response = self.controller.send_user_message(message)
+            return str(response.get("response", "No response content"))
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+class ReactMainWindow(QMainWindow):
+    """
+    Window hosting the React UI via QWebEngineView.
+    """
+    def __init__(self, controller: UltronController, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.controller = controller
+
+        self.setWindowTitle("U.L.T.R.O.N Assistant")
+        self.resize(1100, 720)
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        self.web_view = QWebEngineView(self)
+        self.web_view.page().setBackgroundColor(Qt.transparent)
+        self.setCentralWidget(self.web_view)
+
+        self.channel = QWebChannel()
+        self.bridge = PyBridge(self.controller, self)
+        self.channel.registerObject("pyBridge", self.bridge)
+        self.web_view.page().setWebChannel(self.channel)
+
+        # --- Load React App ---
+        # This logic helps debug the common "white screen" issue.
+
+        # First, let's try the 'dist' folder, which is a common standard.
+        react_path = os.path.abspath("web/ultron-react/dist/index.html")
+
+        if not os.path.exists(react_path):
+            # If 'dist' doesn't exist, check for 'build', another common standard.
+            build_path = os.path.abspath("web/ultron-react/build/index.html")
+            if os.path.exists(build_path):
+                react_path = build_path
+            else:
+                print(f"[ERROR] React build not found in 'dist' or 'build' directories.")
+                error_html = f"<div style='background-color:#111; color:white; padding:2em; font-family:sans-serif;'><h1>React App Not Found</h1><p>Looked for <code>{react_path}</code> and <code>{build_path}</code>.</p><p>Please build the React app first (e.g., 'npm run build').</p></div>"
+                self.web_view.setHtml(error_html)
+                return
+
+        print(f"[INFO] Loading React app from: {react_path}")
+        self.web_view.load(QUrl.fromLocalFile(react_path))
 
 
 class MessageWidget(QFrame):
@@ -590,7 +668,7 @@ class UltronMainWindow(QMainWindow):
             # Basic TTS support: speak short non-code responses
             if response.get("should_speak", True) and ctype != "code":
                 try:
-                    SpeakJARVIS(response.get("response", ""))
+                    SpeakUltron(response.get("response", ""))
                 except Exception:
                     pass
 
@@ -631,7 +709,7 @@ def run_ultron_pyside() -> int:
     """
     app = QApplication.instance() or QApplication(sys.argv)
     controller = UltronController()
-    window = UltronMainWindow(controller)
+    window = ReactMainWindow(controller) # or UltronMainWindow(controller)
     window.show()
     return app.exec()
 
@@ -640,4 +718,3 @@ if __name__ == "__main__":
     from ultron import main as ultron_main
 
     sys.exit(ultron_main(["pyside-ui"]))
-

@@ -5,6 +5,7 @@
   import path from 'path';
 
   export default defineConfig({
+  base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
@@ -55,6 +56,7 @@
     build: {
       target: 'esnext',
       outDir: 'build',
+      emptyOutDir: true,
     },
     server: {
       port: 3000,

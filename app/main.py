@@ -11,7 +11,7 @@ if PROJECT_ROOT not in sys.path:
 from PySide6.QtWidgets import QApplication
 
 from app.orchestration.app_controller import AppController
-from ui.pyside.main_window import UltronController, UltronMainWindow
+from ui.pyside.main_window import UltronController, ReactMainWindow
 
 
 class UnicodeStreamHandler(logging.StreamHandler):
@@ -50,7 +50,7 @@ def main() -> int:
 
     app = QApplication.instance() or QApplication(sys.argv)
     controller = UltronController(app_controller=AppController())
-    window = UltronMainWindow(controller)
+    window = ReactMainWindow(controller)
     window.show()
 
     try:

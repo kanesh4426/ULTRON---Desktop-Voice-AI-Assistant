@@ -1,8 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+/** @jsxImportSource react */
+import * as React from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { ScrollArea } from './ui/scroll-area';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
@@ -12,7 +14,9 @@ import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Mic, MicOff, Send, Settings, Menu, X, MessageSquare, Zap, Volume2, User, History, Trash2, Download, Moon, Sun, Clock,Paperclip,Search,Pencil,Star } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
+import { createId, createInitials } from '../lib/app-utils';
+import { usePyBridge } from '../hooks/usePyBridge';
 
 type ContentType='normal'|'code'|'content'|'technical'|'system';
 
@@ -42,6 +46,7 @@ interface VoiceSettings {
 
 interface UserProfile {
   name: string;
+  email?: string;
   avatar: string;
   initials: string;
 }
@@ -50,6 +55,19 @@ interface AppSettings {
   theme: 'light' | 'dark' | 'auto';
   language: string;
   voiceSettings: VoiceSettings;
+}
+
+interface ResponsiveAIAssistantProps {
+  authenticatedUser?: {
+    email: string;
+    name: string;
+  } | null;
+}
+
+interface ConnectionBanner {
+  type: 'warning' | 'success' | 'error';
+  message: string;
+  visible: boolean;
 }
 
 const QUICK_ACTIONS = [
@@ -61,7 +79,26 @@ const QUICK_ACTIONS = [
   { id: 6, label: 'Daily motivation', prompt: 'Give me daily motivation', icon: '🚀' },
 ];
 
-export function ResponsiveAIAssistant() {
+function readLocalStorage<T>(key: string): T | null {
+  try {
+    const rawValue = localStorage.getItem(key);
+    return rawValue ? (JSON.parse(rawValue) as T) : null;
+  } catch (error) {
+    console.warn(`Unable to parse localStorage key "${key}".`, error);
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Unable to write localStorage key "${key}".`, error);
+  }
+}
+
+export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAIAssistantProps) {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -74,12 +111,17 @@ export function ResponsiveAIAssistant() {
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
-const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-const [historySearch, setHistorySearch] = useState('');
-const [ratings, setRatings] = useState({}as{[key:string]:number});
-const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', message: 'Checking connection...', visible: false });
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [connectionBanner, setConnectionBanner] = useState<ConnectionBanner>({
+    type: 'warning',
+    message: 'Checking connection...',
+    visible: false
+  });
+  const { isConnected, sendMessageToPy } = usePyBridge();
   
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<any>(null);
   const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
   
   const [userProfile, setUserProfile] = useState<UserProfile>({
@@ -100,61 +142,106 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef(null);
-  const connectionHideTimerRef = useRef(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const connectionHideTimerRef = useRef<number | null>(null);
+  const responseTimerIdsRef = useRef<number[]>([]);
+  const chatSessionsRef = useRef<ChatSession[]>([]);
+  const currentSessionIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
 
   // Load data from localStorage on mount
   useEffect(() => {
-    const savedProfile = localStorage.getItem('userProfile');
+    const savedProfile = readLocalStorage<UserProfile>('userProfile');
     if (savedProfile) {
-      setUserProfile(JSON.parse(savedProfile));
-    }
-
-    const savedSettings = localStorage.getItem('appSettings');
-    if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
-    }
-
-    const savedSessions = localStorage.getItem('chatSessions');
-    if (savedSessions) {
-      const sessions = JSON.parse(savedSessions);
-      // Convert date strings back to Date objects
-      const parsedSessions = sessions.map((session: any) => ({
-        ...session,
-        createdAt: new Date(session.createdAt),
-        updatedAt: new Date(session.updatedAt),
-        messages: session.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
+      setUserProfile((prev) => ({
+        ...prev,
+        ...savedProfile,
+        initials: savedProfile.initials || createInitials(savedProfile.name ?? prev.name),
       }));
+    }
+
+    const savedSettings = readLocalStorage<AppSettings>('appSettings');
+    if (savedSettings) {
+      setSettings((prev) => ({
+        ...prev,
+        ...savedSettings,
+        voiceSettings: {
+          ...prev.voiceSettings,
+          ...savedSettings.voiceSettings,
+        },
+      }));
+    }
+
+    const savedSessions = readLocalStorage<ChatSession[]>('chatSessions');
+    if (Array.isArray(savedSessions)) {
+      // Convert date strings back to Date objects
+      const parsedSessions = savedSessions.map((session: any) => ({
+        ...session,
+        createdAt: new Date(session.createdAt || Date.now()),
+        updatedAt: new Date(session.updatedAt || Date.now()),
+        messages: Array.isArray(session.messages) ? session.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp || Date.now())
+        })) : []
+      }));
+      chatSessionsRef.current = parsedSessions;
       setChatSessions(parsedSessions);
     }
   }, []);
 
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    chatSessionsRef.current = chatSessions;
+  }, [chatSessions]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!authenticatedUser) {
+      return;
+    }
+
+    setUserProfile((prev) => {
+      const nextName = authenticatedUser.name.trim() || prev.name;
+      return {
+        ...prev,
+        name: nextName,
+        email: authenticatedUser.email,
+        initials: createInitials(nextName, prev.initials),
+      };
+    });
+  }, [authenticatedUser]);
+
   // Save to localStorage when data changes
   useEffect(() => {
-    localStorage.setItem('userProfile', JSON.stringify(userProfile));
+    writeLocalStorage('userProfile', userProfile);
   }, [userProfile]);
 
   useEffect(() => {
-    localStorage.setItem('appSettings', JSON.stringify(settings));
+    writeLocalStorage('appSettings', settings);
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem('chatSessions', JSON.stringify(chatSessions));
+    writeLocalStorage('chatSessions', chatSessions);
   }, [chatSessions]);
 
   useEffect(() => {
     // Initialize speech recognition
+    let recognitionInstance: any = null;
+
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognitionInstance = new SpeechRecognition();
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionInstance = new SpeechRecognition();
       recognitionInstance.continuous = false;
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = settings.language;
 
-      recognitionInstance.onresult = (event) => {
+      recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
         setIsListening(false);
@@ -171,22 +258,39 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
       };
 
       setRecognition(recognitionInstance);
+    } else {
+      setRecognition(null);
     }
 
     // Initialize speech synthesis
     if ('speechSynthesis' in window) {
       setSpeechSynthesis(window.speechSynthesis);
+    } else {
+      setSpeechSynthesis(null);
     }
+
+    return () => {
+      recognitionInstance?.stop();
+      window.speechSynthesis?.cancel();
+    };
   }, [settings.language]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      responseTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      responseTimerIdsRef.current = [];
+    };
+  }, []);
+
   useEffect(function () {
     function clearBannerTimer() {
-      if (connectionHideTimerRef.current) {
-        window.clearTimeout(connectionHideTimerRef.current as number);
+      if (connectionHideTimerRef.current !== null) {
+        window.clearTimeout(connectionHideTimerRef.current);
+        connectionHideTimerRef.current = null;
       }
     }
     
@@ -252,18 +356,59 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
     }
   };
 
+  const replaceChatSessions = (updater: (prev: ChatSession[]) => ChatSession[]) => {
+    setChatSessions((prev) => {
+      const next = updater(prev);
+      chatSessionsRef.current = next;
+      return next;
+    });
+  };
+
+  const commitMessages = (nextMessages: Message[]) => {
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+  };
+
+  const getSessionMessages = (sessionId: string) => {
+    return (
+      chatSessionsRef.current.find((session) => session.id === sessionId)?.messages ??
+      (currentSessionIdRef.current === sessionId ? messagesRef.current : [])
+    );
+  };
+
+  const ensureSession = (initialText: string) => {
+    if (currentSessionIdRef.current) {
+      return currentSessionIdRef.current;
+    }
+
+    const newSession: ChatSession = {
+      id: createId(),
+      title: initialText.slice(0, 30) + (initialText.length > 30 ? '...' : ''),
+      messages: [],
+      titleLocked: false,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    currentSessionIdRef.current = newSession.id;
+    setCurrentSessionId(newSession.id);
+    replaceChatSessions((prev) => [newSession, ...prev]);
+    return newSession.id;
+  };
+
   const createNewSession = () => {
     const newSession: ChatSession = {
-      id: Date.now().toString(),
+      id: createId(),
       title: 'New Chat',
       messages: [],
       titleLocked: false,
       createdAt: new Date(),
       updatedAt: new Date()
     };
-    setChatSessions(prev => [newSession, ...prev]);
+    currentSessionIdRef.current = newSession.id;
+    replaceChatSessions((prev) => [newSession, ...prev]);
     setCurrentSessionId(newSession.id);
-    setMessages([]);
+    commitMessages([]);
     setShowChat(true);
     toast.success('New chat started');
   };
@@ -271,19 +416,22 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
   const loadSession = (sessionId: string) => {
     const session = chatSessions.find(s => s.id === sessionId);
     if (session) {
+      currentSessionIdRef.current = sessionId;
       setCurrentSessionId(sessionId);
-      setMessages(session.messages);
+      commitMessages(session.messages);
       setShowChat(true);
       setShowHistory(false);
       setShowSidebar(false);
+      setShowAttachmentMenu(false);
     }
   };
 
   const deleteSession = (sessionId: string) => {
-    setChatSessions(prev => prev.filter(s => s.id !== sessionId));
-    if (currentSessionId === sessionId) {
+    replaceChatSessions((prev) => prev.filter((session) => session.id !== sessionId));
+    if (currentSessionIdRef.current === sessionId) {
+      currentSessionIdRef.current = null;
       setCurrentSessionId(null);
-      setMessages([]);
+      commitMessages([]);
       setShowChat(false);
     }
     toast.success('Chat deleted');
@@ -293,42 +441,48 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
     const session = chatSessions.find(s => s.id === sessionId);
     const currentTitle = session ? session.title : 'Chat';
     const newTitle = window.prompt('Rename chat', currentTitle);
-    if (!newTitle) return;
-    setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: newTitle, titleLocked: true, updatedAt: new Date() } : s));
+    const trimmedTitle = newTitle?.trim();
+    if (!trimmedTitle) return;
+    replaceChatSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId
+          ? { ...session, title: trimmedTitle, titleLocked: true, updatedAt: new Date() }
+          : session
+      )
+    );
     toast.success('Chat renamed');
   };
 
   const clearAllHistory = () => {
-    setChatSessions([]);
+    currentSessionIdRef.current = null;
+    replaceChatSessions(() => []);
     setCurrentSessionId(null);
-    setMessages([]);
+    commitMessages([]);
     setShowChat(false);
     setShowHistory(false);
     toast.success('All chat history cleared');
   };
 
-  const updateCurrentSession = (newMessages: Message[]) => {
-    if (currentSessionId) {
-      setChatSessions(prev => prev.map(session => {
-        if (session.id === currentSessionId) {
-          // Update title based on first user message
-          const firstUserMessage = newMessages.find(m => m.sender === 'user');
-          const title = firstUserMessage 
-            ? firstUserMessage.text.slice(0, 30) + (firstUserMessage.text.length > 30 ? '...' : '')
-            : 'New Chat';
-          
-          const resolvedTitle = session.titleLocked ? session.title : title;
-
-          return {
-            ...session,
-            title: resolvedTitle,
-            messages: newMessages,
-            updatedAt: new Date()
-          };
+  const updateCurrentSession = (sessionId: string, newMessages: Message[]) => {
+    replaceChatSessions((prev) =>
+      prev.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
         }
-        return session;
-      }));
-    }
+
+        const firstUserMessage = newMessages.find((message) => message.sender === 'user');
+        const title = firstUserMessage
+          ? firstUserMessage.text.slice(0, 30) + (firstUserMessage.text.length > 30 ? '...' : '')
+          : 'New Chat';
+
+        return {
+          ...session,
+          title: session.titleLocked ? session.title : title,
+          messages: newMessages,
+          updatedAt: new Date()
+        };
+      })
+    );
   };
 
   const inferContentType = (text: string) => {
@@ -370,59 +524,102 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
     }
   };
 
-  const handleSendMessage = (messageText?: string) => {
-    const textToSend = messageText || inputText;
-    if (!textToSend.trim()) return;
+  const handleSendMessage = async (messageText?: string) => {
+    const textToSend = (messageText ?? inputText).trim();
+    if (!textToSend) return;
 
-    // Create new session if none exists
-    if (!currentSessionId) {
-      const newSession: ChatSession = {
-        id: Date.now().toString(),
-        title: textToSend.slice(0, 30) + (textToSend.length > 30 ? '...' : ''),
-        messages: [],
-        titleLocked: false,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      setChatSessions(prev => [newSession, ...prev]);
-      setCurrentSessionId(newSession.id);
-    }
-
+    const sessionId = ensureSession(textToSend);
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createId(),
       text: textToSend,
       sender: 'user',
       contentType: inferContentType(textToSend),
       timestamp: new Date()
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    const nextMessages = [...getSessionMessages(sessionId), userMessage];
+    updateCurrentSession(sessionId, nextMessages);
+    if (currentSessionIdRef.current === sessionId) {
+      commitMessages(nextMessages);
+    }
     setShowChat(true);
-    updateCurrentSession(newMessages);
-
-    // Generate AI response
-    setTimeout(() => {
-      const aiResponseText = generateAIResponse(textToSend);
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: aiResponseText,
-        sender: 'ai',
-        contentType: inferContentType(aiResponseText),
-        timestamp: new Date()
-      };
-      const updatedMessages = [...newMessages, aiResponse];
-      setMessages(updatedMessages);
-      updateCurrentSession(updatedMessages);
-
-      // Auto-speak if enabled
-      if (settings.voiceSettings.autoSpeak) {
-        handleSpeak(aiResponseText);
-      }
-    }, 1000);
-
     setInputText('');
     setShowQuickActions(false);
+    setShowAttachmentMenu(false);
+
+    if (isConnected && window.pyBridge) {
+      try {
+        const rawResponse = await sendMessageToPy(textToSend);
+        let responseText = "";
+        let responseContentType: ContentType = "normal";
+
+        try {
+          // Parse the JSON coming from PySide6 process_message
+          const parsed = JSON.parse(rawResponse);
+          responseText = parsed.response || rawResponse;
+          responseContentType = (parsed.content_type as ContentType) || inferContentType(responseText);
+        } catch (e) {
+          responseText = rawResponse;
+          responseContentType = inferContentType(responseText);
+        }
+
+        const aiResponse: Message = {
+          id: createId(),
+          text: responseText,
+          sender: 'ai',
+          contentType: responseContentType,
+          timestamp: new Date()
+        };
+
+        const updatedMessages = [...getSessionMessages(sessionId), aiResponse];
+        updateCurrentSession(sessionId, updatedMessages);
+        if (currentSessionIdRef.current === sessionId) {
+          commitMessages(updatedMessages);
+        }
+
+        if (settings.voiceSettings.autoSpeak) {
+          handleSpeak(responseText);
+        }
+      } catch (error) {
+        const errorResponse: Message = {
+          id: createId(),
+          text: "Error: Could not reach Python backend. " + (error instanceof Error ? error.message : ""),
+          sender: 'ai',
+          contentType: 'system',
+          timestamp: new Date()
+        };
+        const updatedMessages = [...getSessionMessages(sessionId), errorResponse];
+        updateCurrentSession(sessionId, updatedMessages);
+        if (currentSessionIdRef.current === sessionId) {
+          commitMessages(updatedMessages);
+        }
+      }
+    } else {
+      // Fallback to mock text if not running inside the desktop app wrapper
+      const responseTimerId = window.setTimeout(() => {
+        const aiResponseText = generateAIResponse(textToSend);
+        const aiResponse: Message = {
+          id: createId(),
+          text: aiResponseText,
+          sender: 'ai',
+          contentType: inferContentType(aiResponseText),
+          timestamp: new Date()
+        };
+        const updatedMessages = [...getSessionMessages(sessionId), aiResponse];
+        updateCurrentSession(sessionId, updatedMessages);
+        if (currentSessionIdRef.current === sessionId) {
+          commitMessages(updatedMessages);
+        }
+
+        if (settings.voiceSettings.autoSpeak) {
+          handleSpeak(aiResponseText);
+        }
+
+        responseTimerIdsRef.current = responseTimerIdsRef.current.filter((timerId) => timerId !== responseTimerId);
+      }, 1000);
+
+      responseTimerIdsRef.current.push(responseTimerId);
+    }
   };
 
   const handleQuickAction = (prompt: string) => {
@@ -440,9 +637,14 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
       recognition.stop();
       setIsListening(false);
     } else {
-      recognition.start();
-      setIsListening(true);
-      toast.info('Listening...');
+      try {
+        recognition.start();
+        setIsListening(true);
+        toast.info('Listening...');
+      } catch (err) {
+        console.error('Speech recognition start error:', err);
+        setIsListening(false);
+      }
     }
   };
 
@@ -467,28 +669,22 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
 
+    speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  const handleAttachmentClick = (accept: string) => {
-    const inputEl = fileInputRef.current as HTMLInputElement;
+  const handleAttachmentClick = (accept = '') => {
+    const inputEl = fileInputRef.current;
     if (!inputEl) return;
     inputEl.accept = accept;
     inputEl.click();
     setShowAttachmentMenu(false);
   };
   
-  const handleFileSelect = (e: any) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const fileNames = Array.from(files).map(f => f.name).join(', ');
+    const fileNames = Array.from(files).map((file) => file.name).join(', ');
     toast.success('Attached: '+ fileNames);
     e.target.value = '';
   };
@@ -506,6 +702,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
     link.href = url;
     link.download = `chat-history-${new Date().toISOString().split('T')[0]}.json`;
     link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
     toast.success('Chat history exported');
   };
 
@@ -885,11 +1082,14 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
         </div>
 
         {/* Chat Input - Always at bottom */}
-        <div className="p-4 lg:p-6 relative z-20">
+        <form 
+          onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} 
+          className="p-4 lg:p-6 relative z-20"
+        >
           <Card className="backdrop-blur-lg bg-white/10 border border-white/20 p-4 shadow-xl">
             <div className="flex gap-3">
               <div className="relative">
-                <Button variant="ghost" size="sm" className="h-10 w-10 p-0 text-cyan-200 hover:bg-white/10" onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}>
+                <Button type="button" variant="ghost" size="sm" className="h-10 w-10 p-0 text-cyan-200 hover:bg-white/10" onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}>
                   <Paperclip className="h-4 w-4" />
                 </Button>
                 {showAttachmentMenu && (
@@ -897,20 +1097,20 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                     <button className="w-full text-left px-3 py-2 rounded-md text-sm text-white hover:bg-white/10" onClick={() => handleAttachmentClick('image/*')}>Image</button>
                     <button className="w-full text-left px-3 py-2 rounded-md text-sm text-white hover:bg-white/10" onClick={() => handleAttachmentClick('.pdf,.doc,.docx,.txt')}>Document</button>
                     <button className="w-full text-left px-3 py-2 rounded-md text-sm text-white hover:bg-white/10" onClick={() => handleAttachmentClick('.csv,.json,.xlsx')}>Data</button>
-                    <button className="w-full text-left px-3 py-2 rounded-md text-sm text-white hover:bg-white/10" onClick={() => handleAttachmentClick('*/*')}>Any file</button>
+                    <button className="w-full text-left px-3 py-2 rounded-md text-sm text-white hover:bg-white/10" onClick={() => handleAttachmentClick()}>Any file</button>
                   </div>
                 )}
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelect} multiple />
               </div>
               <div className="flex-1 relative">
-                <Input
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  className="bg-white/10 border-white/20 text-white placeholder:text-white/60 pr-12 rounded-full focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
-                />
+                  <Input
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder="Type your message..."
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60 pr-12 rounded-full focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
+                  />
                 <Button
+                    type="button"
                   variant="ghost"
                   size="sm"
                   className={`absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 ${
@@ -922,7 +1122,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                 </Button>
               </div>
               <Button 
-                onClick={() => handleSendMessage()} 
+                type="submit"
                 disabled={!inputText.trim()}
                 className="bg-cyan-600 hover:bg-cyan-500 text-white border-0 rounded-full px-6 shadow-lg disabled:opacity-50"
               >
@@ -932,11 +1132,11 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
             
             {isListening && (
               <div className="mt-3 text-center">
-                <p className="text-sm text-cyan-300 animate-pulse flex items-center justify-center gap-2">
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"></div>
+                <div className="text-sm text-cyan-300 animate-pulse flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"></span>
                   Listening... Speak now
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                </p>
+                  <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></span>
+                </div>
               </div>
             )}
             
@@ -949,7 +1149,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
               </div>
             )}
           </Card>
-        </div>
+        </form>
       </div>
 
       {/* Settings Dialog */}
@@ -977,7 +1177,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                   </div>
                   <Switch
                     checked={settings.voiceSettings.autoSpeak}
-                    onCheckedChange={(checked) => 
+                    onCheckedChange={(checked: any) => 
                       setSettings(prev => ({
                         ...prev,
                         voiceSettings: { ...prev.voiceSettings, autoSpeak: checked }
@@ -992,7 +1192,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                   <Label className="text-white">Speech Rate: {settings.voiceSettings.rate.toFixed(1)}</Label>
                   <Slider
                     value={[settings.voiceSettings.rate]}
-                    onValueChange={([value]) => 
+                    onValueChange={([value]: number[]) => 
                       setSettings(prev => ({
                         ...prev,
                         voiceSettings: { ...prev.voiceSettings, rate: value }
@@ -1010,7 +1210,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                   <Label className="text-white">Pitch: {settings.voiceSettings.pitch.toFixed(1)}</Label>
                   <Slider
                     value={[settings.voiceSettings.pitch]}
-                    onValueChange={([value]) => 
+                    onValueChange={([value]: number[]) => 
                       setSettings(prev => ({
                         ...prev,
                         voiceSettings: { ...prev.voiceSettings, pitch: value }
@@ -1028,7 +1228,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                   <Label className="text-white">Volume: {Math.round(settings.voiceSettings.volume * 100)}%</Label>
                   <Slider
                     value={[settings.voiceSettings.volume]}
-                    onValueChange={([value]) => 
+                    onValueChange={([value]: number[]) => 
                       setSettings(prev => ({
                         ...prev,
                         voiceSettings: { ...prev.voiceSettings, volume: value }
@@ -1257,7 +1457,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={e => {
+                          onClick={(e: { stopPropagation: () => void; }) => {
                             e.stopPropagation();
                             renameSession(session.id);
                           }}
@@ -1268,7 +1468,7 @@ const [connectionBanner, setConnectionBanner] = useState({ type: 'warning', mess
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={e => {
+                          onClick={(e: { stopPropagation: () => void; }) => {
                             e.stopPropagation();
                             deleteSession(session.id);
                           }}

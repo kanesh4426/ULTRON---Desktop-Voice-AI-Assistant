@@ -1,15 +1,22 @@
+# Core
 Pillow
 python-dotenv
-edge-tts
-google
 httpx
 numpy
-openai
-pollinations
 psutil
-pygame
-scikit-learn
-SpeechRecognition
 PySide6
+
+# AI & Providers
+google-generativeai
+openai
+edge-tts
+
+# [rag]
+sentence-transformers
+scikit-learn
+
+# [automation]
 winapps
 AppOpener
+SpeechRecognition
+pygame

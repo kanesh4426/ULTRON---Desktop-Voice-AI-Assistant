@@ -7,7 +7,7 @@ from app.services.chat_db import ChatDatabase
 
 class ChatService:
     """
-    Chat service backed by SQLite for persistent history.
+    Chat service backed by PostgreSQL for persistent history.
     """
 
     def __init__(self, db: ChatDatabase | None = None) -> None:

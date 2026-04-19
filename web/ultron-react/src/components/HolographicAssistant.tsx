@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Mic, MicOff, Send, Chrome, Music, Settings, User, MessageSquare } from 'lucide-react';
-import exampleImage from 'figma:asset/ef6432358e70cd07cef418bda499a8b4438f8bd9.png';
+const exampleImage = 'https://via.placeholder.com/192x192?text=Holographic+AI';
+import { toast } from 'sonner';
+import { createId } from '../lib/app-utils';
 
 interface Message {
   id: string;
@@ -17,20 +19,23 @@ export function HolographicAssistant() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<any>(null);
   const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const responseTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Initialize speech recognition
+    let recognitionInstance: any = null;
+
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognitionInstance = new SpeechRecognition();
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionInstance = new SpeechRecognition();
       recognitionInstance.continuous = false;
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = 'en-US';
 
-      recognitionInstance.onresult = (event) => {
+      recognitionInstance.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
         setIsListening(false);
@@ -45,17 +50,34 @@ export function HolographicAssistant() {
       };
 
       setRecognition(recognitionInstance);
+    } else {
+      setRecognition(null);
     }
 
     // Initialize speech synthesis
     if ('speechSynthesis' in window) {
       setSpeechSynthesis(window.speechSynthesis);
+    } else {
+      setSpeechSynthesis(null);
     }
+
+    return () => {
+      recognitionInstance?.stop();
+      window.speechSynthesis?.cancel();
+    };
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (responseTimerRef.current !== null) {
+        window.clearTimeout(responseTimerRef.current);
+      }
+    };
+  }, []);
 
   const generateAIResponse = (userMessage: string): string => {
     const lowerMessage = userMessage.toLowerCase();
@@ -76,11 +98,12 @@ export function HolographicAssistant() {
   };
 
   const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+    const textToSend = inputText.trim();
+    if (!textToSend) return;
 
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText,
+      id: createId(),
+      text: textToSend,
       sender: 'user',
       timestamp: new Date()
     };
@@ -89,14 +112,15 @@ export function HolographicAssistant() {
     setShowChat(true);
 
     // Generate AI response
-    setTimeout(() => {
+    responseTimerRef.current = window.setTimeout(() => {
       const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: generateAIResponse(inputText),
+        id: createId(),
+        text: generateAIResponse(textToSend),
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
+      responseTimerRef.current = null;
     }, 1000);
 
     setInputText('');
@@ -104,7 +128,7 @@ export function HolographicAssistant() {
 
   const handleVoiceInput = () => {
     if (!recognition) {
-      alert('Speech recognition is not supported in your browser.');
+      toast.error('Speech recognition is not supported in your browser.');
       return;
     }
 
@@ -119,7 +143,7 @@ export function HolographicAssistant() {
 
   const handleSpeak = (text: string) => {
     if (!speechSynthesis) {
-      alert('Speech synthesis is not supported in your browser.');
+      toast.error('Speech synthesis is not supported in your browser.');
       return;
     }
 
@@ -140,7 +164,7 @@ export function HolographicAssistant() {
     speechSynthesis.speak(utterance);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -149,7 +173,7 @@ export function HolographicAssistant() {
 
   const handleActionClick = (action: string) => {
     const actionMessage: Message = {
-      id: Date.now().toString(),
+      id: createId(),
       text: `${action} activated`,
       sender: 'ai',
       timestamp: new Date()
@@ -180,7 +204,7 @@ export function HolographicAssistant() {
 
               {/* Welcome Text */}
               <div className="text-center space-y-2">
-                <h1 className="text-4xl text-white">Welcome, Papa</h1>
+                <h1 className="text-4xl text-white">Welcome back</h1>
                 <p className="text-xl text-gray-300">Hi, I'm Aarav AI</p>
                 <p className="text-lg text-gray-400">Your Personal Assistant</p>
               </div>
@@ -223,7 +247,7 @@ export function HolographicAssistant() {
               </div>
             </>
           ) : (
-            /* Chat Interface */
+            /* Chat Interface */ 
             <div className="w-full max-w-4xl h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <Button
@@ -274,7 +298,7 @@ export function HolographicAssistant() {
               <Input
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 placeholder="Chat input"
                 className="bg-gray-800 border-gray-600 text-white placeholder:text-gray-400 pr-12 rounded-full"
               />

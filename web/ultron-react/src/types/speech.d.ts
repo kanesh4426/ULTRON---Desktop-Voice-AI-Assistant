@@ -10,7 +10,7 @@ interface SpeechRecognition extends EventTarget {
 }
 
 interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
+  readonly results: SpeechRecognitionResultList;
 }
 
 interface SpeechRecognitionResultList {
@@ -30,10 +30,22 @@ interface SpeechRecognitionAlternative {
   readonly confidence: number;
 }
 
+type SpeechRecognitionErrorCode = 
+  | "no-speech"
+  | "aborted"
+  | "audio-capture"
+  | "network"
+  | "not-allowed"
+  | "service-not-allowed"
+  | "bad-grammar"
+  | "language-not-supported";
+
 interface SpeechRecognitionErrorEvent extends Event {
-  readonly error: string;
+  readonly error: SpeechRecognitionErrorCode;
   readonly message: string;
 }
+
+export {};
 
 declare global {
   interface Window {

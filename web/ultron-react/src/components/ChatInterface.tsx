@@ -3,6 +3,8 @@ import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { Mic, MicOff, Send, Volume2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { createId } from '../lib/app-utils';
 
 interface Message {
   id: string;
@@ -23,20 +25,23 @@ export function ChatInterface() {
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<any>(null);
   const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const responseTimerIdsRef = useRef<number[]>([]);
 
   useEffect(() => {
     // Initialize speech recognition
+    let recognitionInstance: any = null;
+
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognitionInstance = new SpeechRecognition();
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionInstance = new SpeechRecognition();
       recognitionInstance.continuous = false;
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = 'en-US';
 
-      recognitionInstance.onresult = (event) => {
+      recognitionInstance.onresult = (event:any) => {
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
         setIsListening(false);
@@ -51,17 +56,33 @@ export function ChatInterface() {
       };
 
       setRecognition(recognitionInstance);
+    } else {
+      setRecognition(null);
     }
 
     // Initialize speech synthesis
     if ('speechSynthesis' in window) {
       setSpeechSynthesis(window.speechSynthesis);
+    } else {
+      setSpeechSynthesis(null);
     }
+
+    return () => {
+      recognitionInstance?.stop();
+      window.speechSynthesis?.cancel();
+    };
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      responseTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      responseTimerIdsRef.current = [];
+    };
+  }, []);
 
   const generateAIResponse = (userMessage: string): string => {
     // Mock AI responses based on keywords
@@ -83,11 +104,12 @@ export function ChatInterface() {
   };
 
   const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+    const textToSend = inputText.trim();
+    if (!textToSend) return;
 
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText,
+      id: createId(),
+      text: textToSend,
       sender: 'user',
       timestamp: new Date()
     };
@@ -95,22 +117,24 @@ export function ChatInterface() {
     setMessages(prev => [...prev, userMessage]);
 
     // Generate AI response
-    setTimeout(() => {
+    const responseTimerId = window.setTimeout(() => {
       const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: generateAIResponse(inputText),
+        id: createId(),
+        text: generateAIResponse(textToSend),
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
+      responseTimerIdsRef.current = responseTimerIdsRef.current.filter((timerId) => timerId !== responseTimerId);
     }, 1000);
+    responseTimerIdsRef.current.push(responseTimerId);
 
     setInputText('');
   };
 
   const handleVoiceInput = () => {
     if (!recognition) {
-      alert('Speech recognition is not supported in your browser.');
+      toast.error('Speech recognition is not supported in your browser.');
       return;
     }
 
@@ -118,14 +142,20 @@ export function ChatInterface() {
       recognition.stop();
       setIsListening(false);
     } else {
-      recognition.start();
-      setIsListening(true);
+      try {
+        recognition.start();
+        setIsListening(true);
+      } catch (err) {
+        console.error('Speech recognition start error:', err);
+        toast.error('Microphone access denied or unavailable.');
+        setIsListening(false);
+      }
     }
   };
 
   const handleSpeak = (text: string) => {
     if (!speechSynthesis) {
-      alert('Speech synthesis is not supported in your browser.');
+      toast.error('Speech synthesis is not supported in your browser.');
       return;
     }
 
@@ -143,14 +173,8 @@ export function ChatInterface() {
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
 
+    speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
   };
 
   return (
@@ -188,17 +212,20 @@ export function ChatInterface() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 border-t bg-background">
+      <form 
+        onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} 
+        className="p-4 border-t bg-background"
+      >
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Input
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyPress={handleKeyPress}
               placeholder="Type your message or use voice input..."
               className="pr-12"
             />
             <Button
+              type="button"
               variant="ghost"
               size="sm"
               className={`absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 ${
@@ -209,7 +236,7 @@ export function ChatInterface() {
               {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
           </div>
-          <Button onClick={handleSendMessage} disabled={!inputText.trim()}>
+          <Button type="submit" disabled={!inputText.trim()}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
@@ -229,7 +256,7 @@ export function ChatInterface() {
             </p>
           </div>
         )}
-      </div>
+      </form>
     </div>
   );
 }

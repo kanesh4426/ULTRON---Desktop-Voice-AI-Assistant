@@ -4,15 +4,39 @@ import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Sparkles, Mail, Lock, User, ArrowLeft } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { Sparkles, Mail, Lock, User } from 'lucide-react';
+import { toast } from 'sonner';
+import { createInitials, normalizeEmail } from '../lib/app-utils';
 
 interface AuthPageProps {
   onLogin: (email: string, name: string) => void;
-  onBack: () => void;
 }
 
-export function AuthPage({ onLogin, onBack }: AuthPageProps) {
+interface StoredUser {
+  name: string;
+  email: string;
+  password: string;
+  createdAt: string;
+}
+
+function getStoredUser(email: string): StoredUser | null {
+  const key = `user_${email}`;
+  const rawUser = localStorage.getItem(key);
+
+  if (!rawUser) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawUser) as StoredUser;
+  } catch (error) {
+    console.warn(`Unable to read stored user "${key}".`, error);
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+export function AuthPage({ onLogin }: AuthPageProps) {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [signupName, setSignupName] = useState('');
@@ -22,19 +46,29 @@ export function AuthPage({ onLogin, onBack }: AuthPageProps) {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const normalizedEmail = normalizeEmail(loginEmail);
     
-    if (!loginEmail || !loginPassword) {
+    if (!normalizedEmail || !loginPassword) {
       toast.error('Please fill in all fields');
       return;
     }
 
     // Mock authentication - in production, this would call an API
-    const mockUser = localStorage.getItem(`user_${loginEmail}`);
-    if (mockUser) {
-      const userData = JSON.parse(mockUser);
+    const userData = getStoredUser(normalizedEmail);
+    if (userData) {
       if (userData.password === loginPassword) {
+        localStorage.setItem(
+          'userProfile',
+          JSON.stringify({
+            name: userData.name,
+            email: normalizedEmail,
+            avatar: '',
+            initials: createInitials(userData.name),
+          })
+        );
         toast.success('Welcome back!');
-        onLogin(loginEmail, userData.name);
+        onLogin(normalizedEmail, userData.name);
       } else {
         toast.error('Invalid password');
       }
@@ -46,7 +80,10 @@ export function AuthPage({ onLogin, onBack }: AuthPageProps) {
   const handleSignup = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!signupName || !signupEmail || !signupPassword || !signupConfirmPassword) {
+    const trimmedName = signupName.trim();
+    const normalizedEmail = normalizeEmail(signupEmail);
+
+    if (!trimmedName || !normalizedEmail || !signupPassword || !signupConfirmPassword) {
       toast.error('Please fill in all fields');
       return;
     }
@@ -62,23 +99,32 @@ export function AuthPage({ onLogin, onBack }: AuthPageProps) {
     }
 
     // Check if user already exists
-    const existingUser = localStorage.getItem(`user_${signupEmail}`);
+    const existingUser = getStoredUser(normalizedEmail);
     if (existingUser) {
       toast.error('Account already exists. Please login.');
       return;
     }
 
     // Create new user
-    const userData = {
-      name: signupName,
-      email: signupEmail,
+    const userData: StoredUser = {
+      name: trimmedName,
+      email: normalizedEmail,
       password: signupPassword,
       createdAt: new Date().toISOString()
     };
 
-    localStorage.setItem(`user_${signupEmail}`, JSON.stringify(userData));
+    localStorage.setItem(`user_${normalizedEmail}`, JSON.stringify(userData));
+    localStorage.setItem(
+      'userProfile',
+      JSON.stringify({
+        name: trimmedName,
+        email: normalizedEmail,
+        avatar: '',
+        initials: createInitials(trimmedName),
+      })
+    );
     toast.success('Account created successfully!');
-    onLogin(signupEmail, signupName);
+    onLogin(normalizedEmail, trimmedName);
   };
 
   return (
@@ -87,16 +133,6 @@ export function AuthPage({ onLogin, onBack }: AuthPageProps) {
       <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-cyan-500/20 to-blue-700/20"></div>
       <div className="absolute top-20 left-10 w-64 h-64 bg-cyan-400/10 rounded-full blur-3xl"></div>
       <div className="absolute bottom-20 right-10 w-80 h-80 bg-blue-400/10 rounded-full blur-3xl"></div>
-
-      {/* Back Button */}
-      <Button
-        variant="ghost"
-        onClick={onBack}
-        className="absolute top-6 left-6 text-white hover:bg-white/10 z-20"
-      >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back
-      </Button>
 
       {/* Auth Card */}
       <Card className="relative z-10 w-full max-w-md mx-4 p-8 backdrop-blur-lg bg-white/10 border-white/20">

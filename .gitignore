@@ -1,2 +1,44 @@
+# Frontend dependencies and build outputs
 node_modules/
 **/node_modules/
+dist/
+build/
+
+# Python caches and local environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Logs and runtime output
+*.log
+logs/
+data/logs/
+
+# Local app state and generated data
+.jarvis_file_access/
+.jarvis_ml_data/
+jarvis_rl_qvalues.json
+ml_data/intent_classifier.pkl
+data/rag_index/
+Database/Audio/
+Database/Image.png
+
+# Root-level scratch and temporary files
+/_tmp*
+/tmp*
+/temp*.txt
+/test_echo.py
+/test_echo2.py
+/test_line.txt
+/root_script_test.js
+**/_write_test.txt

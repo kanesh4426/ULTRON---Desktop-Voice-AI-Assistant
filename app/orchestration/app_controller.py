@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from app.models.generation_request import GenerationRequest
 from app.orchestration.workflow_runner import AssistantEngine
-from app.services.app_service import AppController as SystemAppController
+from app_access.manager import AppManager
 from app.services.chat_service import ChatService
 from app.utils.config import AssistantConfig
 
@@ -24,7 +24,7 @@ class AppController:
         self.config = config or AssistantConfig.from_env()
         self.engine = AssistantEngine(self.config)
         self.chat = chat_service or ChatService()
-        self.system_apps = SystemAppController()
+        self.system_apps = AppManager()
 
     # --- Chat management -------------------------------------------------
 
@@ -115,7 +115,17 @@ class AppController:
     @staticmethod
     def _is_app_command(text: str) -> bool:
         lowered = text.strip().lower()
-        return lowered.startswith(("open ", "close ", "start ", "launch ", "run "))
+        if lowered.startswith(("open ", "close ", "start ", "launch ", "run ")):
+            return True
+            
+        # Broader intent matching for polite or conversational commands
+        action_words = {"open", "close", "launch", "start", "run"}
+        common_apps = {
+            "chrome", "browser", "spotify", "discord", "whatsapp", 
+            "calculator", "notepad", "youtube", "telegram", "word", "excel"
+        }
+        words = set(re.findall(r'\b\w+\b', lowered))
+        return bool(words.intersection(action_words) and words.intersection(common_apps))
 
     @staticmethod
     def _detect_content_type(response_text: str) -> str:

@@ -1,3 +1,5 @@
+import sys
+
 import pygame
 import asyncio
 import edge_tts
@@ -47,7 +49,7 @@ def clean_text(text: str) -> str:
     
     return cleaned_text
 
-def cleanup_old_audio_files(max_age_minutes=15):
+def cleanup_old_audio_files(max_age_minutes=15, workspace_dir="data"):
     """
     Remove audio files older than specified minutes
     """
@@ -61,7 +63,7 @@ def cleanup_old_audio_files(max_age_minutes=15):
     _last_cleanup_time = current_time
     
     try:
-        audio_dir = Path("data/audio")
+        audio_dir = Path(workspace_dir) / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
         
         # Get all audio files
@@ -88,7 +90,7 @@ def cleanup_old_audio_files(max_age_minutes=15):
     except Exception as e:
         logger.error(f"Error in audio file cleanup: {e}")
 
-async def text_to_audio_file(text: str) -> Optional[str]:
+async def text_to_audio_file(text: str, workspace_dir: str = "data") -> Optional[str]:
     """
     Converts text to speech audio file using edge-tts with unique filename.
     """
@@ -98,7 +100,7 @@ async def text_to_audio_file(text: str) -> Optional[str]:
         
     # Use timestamp and random number to create unique filename
     timestamp = int(time.time() * 1000)
-    file_path = f"data/audio/TTS_{timestamp}.mp3"
+    file_path = str(Path(workspace_dir) / "audio" / f"TTS_{timestamp}.mp3")
     
     try:
         # Ensure the directory exists
@@ -122,7 +124,7 @@ async def text_to_audio_file(text: str) -> Optional[str]:
         logger.error(f"Failed to convert text to audio: {e}")
         return None
 
-def text_to_speech(text: str, callback_func: Optional[Callable[[Any], bool]] = None) -> bool:
+def text_to_speech(text: str, callback_func: Optional[Callable[[Any], bool]] = None, workspace_dir: str = "data") -> bool:
     """
     Plays text as speech using pygame.
     """
@@ -146,7 +148,7 @@ def text_to_speech(text: str, callback_func: Optional[Callable[[Any], bool]] = N
                 return False
 
         # Generate the audio file with unique filename
-        audio_file = asyncio.run(text_to_audio_file(text))
+        audio_file = asyncio.run(text_to_audio_file(text, workspace_dir))
         
         if not audio_file or not os.path.exists(audio_file):
             logger.error("Failed to generate audio file")
@@ -192,11 +194,11 @@ def text_to_speech(text: str, callback_func: Optional[Callable[[Any], bool]] = N
             
         # Schedule cleanup for the next run
         try:
-            cleanup_old_audio_files(15)
+            cleanup_old_audio_files(15, workspace_dir)
         except:
             pass
 
-def SpeakJARVIS(text: str, callback_func: Optional[Callable[[Any], bool]] = None) -> bool:
+def SpeakJARVIS(text: str, callback_func: Optional[Callable[[Any], bool]] = None, workspace_dir: str = "data") -> bool:
     """
     Smart text-to-speech function that handles long text appropriately.
     """
@@ -223,17 +225,17 @@ def SpeakJARVIS(text: str, callback_func: Optional[Callable[[Any], bool]] = None
         if len(sentences) > 2:
             shortened_text = ' '.join(sentences[:2])
             shortened_text += " The rest is available on screen."
-            return text_to_speech(shortened_text, callback_func)
+            return text_to_speech(shortened_text, callback_func, workspace_dir)
         else:
-            return text_to_speech(cleaned_text, callback_func)
+            return text_to_speech(cleaned_text, callback_func, workspace_dir)
     else:
-        return text_to_speech(cleaned_text, callback_func)
+        return text_to_speech(cleaned_text, callback_func, workspace_dir)
 
 # Add a function to manually trigger cleanup if needed
-def cleanup_all_audio_files():
+def cleanup_all_audio_files(workspace_dir: str = "data"):
     """Remove all audio files (use with caution)"""
     try:
-        audio_dir = Path("data/audio")
+        audio_dir = Path(workspace_dir) / "audio"
         audio_files = glob.glob(str(audio_dir / "TTS_*.mp3"))
         
         files_deleted = 0

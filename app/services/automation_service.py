@@ -1,11 +1,15 @@
-﻿import os
+﻿﻿import os
 import re
 import sys
 import subprocess
 from typing import Optional, Dict, Any, List
-from openai import OpenAI
 from dotenv import load_dotenv
 import google.generativeai as genai
+from app.models.generation_request import GenerationRequest
+from app.orchestration.app_controller import AppController
+from app.orchestration.workflow_runner import AssistantEngine
+from app.services.app_service import close_app, open_app
+from app.utils.config import AssistantConfig
 
 # Add debugger imports
 try:
@@ -122,55 +126,60 @@ except ImportError:
     print("âš ï¸  local_file_access module not found. File operations disabled.")
     FILE_ACCESSOR_AVAILABLE = False
 
-# Import AppController module for application control
+# Import AppManager module for application control
 try:
-    from app.services.app_service import AppController, open_app, close_app, process_command, is_app_running
+    from app_access.manager import AppManager
     APP_CONTROLLER_AVAILABLE = True
-    print("âœ… AppController imported successfully")
+    print("✅ AppManager imported successfully")
 except ImportError as e:
-    print(f"âš ï¸  AppController import failed: {e}")
+    print(f"⚠️  AppManager import failed: {e}")
     # Create fallback dummy functions
-    class DummyAppController:
+    class DummyAppManager:
         def open_application(self, app_name): 
-            return {'success': False, 'error': 'AppController not available'}
+            return {'success': False, 'error': 'AppManager not available'}
         def close_application(self, app_name): 
-            return {'success': False, 'error': 'AppController not available'}
+            return {'success': False, 'error': 'AppManager not available'}
         def process_command(self, command): 
-            return {'success': False, 'error': 'AppController not available'}
-        def is_app_running(self, app_name): 
-            return {'success': False, 'error': 'AppController not available'}
+            return {'success': False, 'error': 'AppManager not available'}
+        def is_application_running(self, app_name): 
+            return {'success': False, 'error': 'AppManager not available'}
         def list_running_apps(self): 
-            return {'success': False, 'error': 'AppController not available'}
+            return {'success': False, 'error': 'AppManager not available'}
+        def open_website(self, target): 
+            return {'success': False, 'error': 'AppManager not available'}
     
-    AppController = DummyAppController
-    open_app = lambda app_name: {'success': False, 'error': 'AppController not available'}
-    close_app = lambda app_name: {'success': False, 'error': 'AppController not available'}
-    process_command = lambda command: {'success': False, 'error': 'AppController not available'}
-    is_app_running = lambda app_name: {'success': False, 'error': 'AppController not available'}
+    AppManager = DummyAppManager
     APP_CONTROLLER_AVAILABLE = False
-class JARVISAI:
+class UltronAI:
     """
-    JARVIS AI Assistant - Advanced Task Executor
+    ULTRON AI Assistant - Advanced Task Executor
     A powerful AI assistant that can execute system tasks safely and efficiently.
     """
     
     def __init__(self, groq_api_key: str = None):
-        """Initialize JARVIS AI Assistant
+        """Initialize ULTRON AI Assistant
          Args:
              groq_api_key (str): Groq API key for code generation
          """
         self.groq_api_key = groq_api_key
         self.load_environment()
-        self.initialize_client()
+        
+        config = AssistantConfig(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            groq_api_key=self.api_key,
+            gemini_api_key=os.getenv("GEMINI_API_KEY"),
+            huggingface_api_key=os.getenv("HUGGINGFACE_API_KEY"),
+            openrouter_api_key=os.getenv("OPENROUTER_API_KEY")
+        )
+        self.engine = AssistantEngine(config)
+        
         self.setup_conversation_context()
 
         # Initialize CodeGenerator with API key
         try:
-            from CodeGenerator import CodeGenerator
-            api_key = self.groq_api_key or os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                raise ValueError("No API key found for CodeGenerator")
-            self.codegen = CodeGenerator(api_key=api_key)
+            from app.agents.roles.code_generator import CodeGenerator
+            self.codegen = CodeGenerator(engine=self.engine)
         except ImportError:
             print("âŒ CodeGenerator module not found. Code generation features disabled.")
             self.codegen = None
@@ -183,7 +192,7 @@ class JARVISAI:
 
         # Initialize app controller if available
         if APP_CONTROLLER_AVAILABLE:
-            self.app_controller = AppController()
+            self.app_controller = AppManager()
         else:
             self.app_controller = None
 
@@ -191,85 +200,77 @@ class JARVISAI:
         """Load environment variables safely"""
         try:
             load_dotenv()
-            #Use provided API key or fall back to environment variable
             self.api_key = self.groq_api_key or os.getenv("GROQ_API_KEY")
-            if not self.api_key:
-                raise ValueError("GROQ_API_KEY not found in environment variables or provided parameter")
         except Exception as e:
             print(f"âŒ Failed to load environment: {e}")
             sys.exit(1)
             
-    def initialize_client(self):
-        """Initialize the Groq API client"""
-        try:
-            self.client = OpenAI(
-                base_url="https://api.groq.com/openai/v1",
-                api_key=self.api_key
-            )
-        except Exception as e:
-            print(f"âŒ Failed to initialize API client: {e}")
-            sys.exit(1)
-            
     def setup_conversation_context(self):
-        """Setup the conversation context for JARVIS AI"""
-        self.messages = [
-            {
-                "role": "system", 
-                "content": "You are JARVIS, an advanced AI assistant created by Kanesh. You are designed to be helpful, safe, and efficient."
-            },
-            {
-                "role": "system", 
-                "content": """You are a task executor that can perform system operations safely. Always prioritize user safety and system security.
+        """Setup the conversation context for ULTRON AI"""
+        self.system_prompt = """You are ULTRON, an advanced AI assistant. You are designed to be helpful, safe, and efficient.
+You are a task executor that can perform system operations safely. Always prioritize user safety and system security.
 
-                ### 1. **Automating YouTube Video Search & Google Search**
-                **User:** "Write a Python script to search YouTube and Google automatically."
+### 1. **Automating YouTube Video Search & Google Search**
+**User:** "Write a Python script to search YouTube and Google automatically."
 
-                **JARVIS:**
-                ```python
-                import pywhatkit
+**ULTRON:**
+```python
+import pywhatkit
 
-                def play_song(song: str) -> None:
-                    pywhatkit.playonyt(song)
+def play_song(song: str) -> None:
+    pywhatkit.playonyt(song)
 
-                def google_search(query: str) -> None:
-                    pywhatkit.search(query)
+def google_search(query: str) -> None:
+    pywhatkit.search(query)
 
-                # Example usage
-                play_song("Imagine Dragons Believer")
-                google_search("Latest AI advancements")
+# Example usage
+play_song("Imagine Dragons Believer")
+google_search("Latest AI advancements")
+```
 
-                """
-            },
-            {
-                "role": "system", 
-                "content": "Available modules: webbrowser, pyautogui, time, pyperclip, random, datetime, tkinter, os, subprocess (use carefully), psutil for process management."
-            },
-            {
-                "role": "system", 
-                "content": "IMPORTANT: For opening applications and websites, use the built-in AppController module instead of writing raw Python code."
-            },
-            {
-                "role": "system", 
-                "content": "Application control examples:\n- 'open chrome' â†’ Uses AppController\n- 'open https://google.com' â†’ Uses AppController\n- 'close chrome' â†’ Uses AppController"
-            },
-            # Examples for better context
-            {
-                "role": "user", 
-                "content": "open Google Chrome"
-            },
-            {
-                "role": "assistant", 
-                "content": "\n```python\nimport webbrowser\nimport time\n\n# Open Chrome with Google homepage\nwebbrowser.register('chrome', None, webbrowser.BackgroundBrowser('chrome'))\nwebbrowser.get('chrome').open('https://www.google.com')\ntime.sleep(1)  # Brief pause for application to load\nprint('Google Chrome opened successfully')\n```"
-            },
-            {
-                "role": "user", 
-                "content": "close Google Chrome"
-            },
-            {
-                "role": "assistant", 
-                "content": "\n```python\nimport psutil\nimport os\nimport time\n\ntry:\n    # Find and terminate Chrome processes\n    for proc in psutil.process_iter(['pid', 'name']):\n        if 'chrome' in proc.info['name'].lower():\n            proc.terminate()\n    time.sleep(2)\n    print('Google Chrome closed successfully')\nexcept Exception as e:\n    # Fallback method\n    if os.name == 'nt':  # Windows\n        os.system('taskkill /im chrome.exe /f')\n    else:  # Unix/Linux/Mac\n        os.system('pkill -f chrome')\n    print('Chrome closed using fallback method')\n```"
-            }
-        ]
+Available modules: webbrowser, pyautogui, time, pyperclip, random, datetime, tkinter, os, subprocess (use carefully), psutil for process management.
+IMPORTANT: For opening applications and websites, use the built-in AppController module instead of writing raw Python code.
+Application control examples:
+- 'open chrome' → Uses AppController
+- 'open https://google.com' → Uses AppController
+- 'close chrome' → Uses AppController
+
+Examples for better context:
+User: open Google Chrome
+Assistant: 
+```python
+import webbrowser
+import time
+
+# Open Chrome with Google homepage
+webbrowser.register('chrome', None, webbrowser.BackgroundBrowser('chrome'))
+webbrowser.get('chrome').open('https://www.google.com')
+time.sleep(1)  # Brief pause for application to load
+print('Google Chrome opened successfully')
+```
+
+User: close Google Chrome
+Assistant: 
+```python
+import psutil
+import os
+import time
+
+try:
+    # Find and terminate Chrome processes
+    for proc in psutil.process_iter(['pid', 'name']):
+        if 'chrome' in proc.info['name'].lower():
+            proc.terminate()
+    time.sleep(2)
+    print('Google Chrome closed successfully')
+except Exception as e:
+    # Fallback method
+    if os.name == 'nt':  # Windows
+        os.system('taskkill /im chrome.exe /f')
+    else:  # Unix/Linux/Mac
+        os.system('pkill -f chrome')
+    print('Chrome closed using fallback method')
+```"""
         
     def execute_task(self, task: str) -> Optional[str]:
         """
@@ -282,16 +283,15 @@ class JARVISAI:
             Optional[str]: The response from the API or None if failed
         """
         try:
-            response = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=self.messages + [{"role": "user", "content": task}],
-                max_tokens=1500,
-                temperature=0.7,
-                top_p=0.9
+            full_prompt = f"{self.system_prompt}\n\nUser: {task}"
+            req = GenerationRequest(
+                user_input=full_prompt,
+                task_type="coding"
             )
-            
-            result = response.choices[0].message.content.strip()
-            return result
+            result = self.engine.generate(req)
+            if result.get("success"):
+                return result.get("response", "").strip()
+            return None
             
         except Exception as e:
             return None
@@ -542,7 +542,9 @@ class JARVISAI:
         if not DEBUGGER_AVAILABLE:
             return {"error": "Debugger not available"}
         
-        return debug_code(code, language)
+        from app.agents.roles.code_debugger import MultiLanguageDebugger
+        debugger = MultiLanguageDebugger(engine=self.engine)
+        return debugger.debug_code(code, language)
 
     def list_debug_languages(self) -> List[str]:
         """List all supported debugging languages"""
@@ -833,279 +835,3 @@ class JARVISAI:
                 
         except Exception as e:
             return f"âŒ Error executing file operation: {str(e)}"
-    
-    def interactive_mode(self):
-        """Run Jarvis AI in interactive mode"""
-        print("JARVIS AI Interactive Mode")
-        print("commands:")
-        print("  - 'generate code [language]: [prompt]' - Generate code")
-        print("  - 'generate content [type]: [prompt]' - Generate content (blog, article, technical, creative)")
-        print("  - 'execute: [task]' - Execute system task")
-
-        if FILE_ACCESSOR_AVAILABLE:
-            print("  - 'file [operation] [args]' - File operations")
-            print("    Operations: create, read, delete, mkdir, rmdir, rename, move, copy, list, info, search, exists")
-        if APP_CONTROLLER_AVAILABLE:
-            print("  - 'app [operation] [args]' - Application control")
-            print("    Operations: open, close, status, list")
-        if DEBUGGER_AVAILABLE:
-            print("  - 'debug: [language] [code]' - Debug code")
-            print("  - 'debug interactive' - Start interactive debugger")
-            print("  - 'debug languages' - List supported debug languages")
-        print("  - 'exit' - Quit")
-
-        while True:
-            try:
-                user_input = input("\nJARVIS>").strip()
-                    
-                if user_input.lower() in ['exit', 'quit','bye']:
-                    print("Goodbye!")
-                    break
-
-                # Handle code generation commands
-                if user_input.startswith('generate code'):
-                    parts = user_input.split(':', 1)
-                    if len(parts) > 1:
-                        language_prompt = parts[0].replace('generate code', '').strip()
-                        prompt = parts[1].strip()
-                            
-                        # Extract language if specified
-                        language = None
-                        if language_prompt:
-                            language = language_prompt
-                            
-                        result = self.generate_code(prompt, language, save_to_file=True)
-                        print(f"Generated {result['language'].upper()} code:")
-                        print(result['code'])
-                        if 'filepath' in result:
-                            print(f"Saved to: {result['filepath']}")
-
-                # Handle content generation commands
-                elif user_input.startswith('generate content'):
-                    if not CONTENT_GEN_AVAILABLE:
-                        print("âŒ Content generation not available. Install required modules.")
-                        continue
-
-                    parts = user_input.split(':', 1)
-                    if len(parts) > 1:
-                        type_prompt = parts[0].replace('generate content', '').strip()
-                        prompt = parts[1].strip()
-                            
-                    # Extract content type if specified
-                    content_type = "article"  # Default
-                    if type_prompt:
-                        content_type = type_prompt
-                            
-                    # Validate content type
-                    valid_types = ["blog", "article", "technical", "creative"]
-                    if content_type not in valid_types:
-                        print(f"âŒ Invalid content type. Choose from: {', '.join(valid_types)}")
-                        continue
-
-                    # Generate content
-                    try:
-                        result = generate_content(prompt, content_type=content_type)
-                            
-                        if result and result.get("success"):
-                            print("âœ… Content generated successfully!")
-                            print(f"ðŸ“ Saved to: {result['filepath']}")
-                            if result.get('quality_issues'):
-                                print("âš ï¸  Quality notes:", result['quality_issues'])
-                        else:
-                            print("âŒ Content generation failed.")
-                        
-                    except Exception as e:
-                        print(f"âŒ Error generating content: {e}")
-
-                # Handle debugger commands
-                elif user_input.startswith('debug'):
-                    if not DEBUGGER_AVAILABLE:
-                         print("âŒ Debugger not available. Install MultiLanguageDebugger module.")
-                         continue
-                    
-                    if user_input == 'debug interactive':
-                        print("Starting interactive debugger...")
-                        interactive_debugger()
-                    
-                    elif user_input == 'debug languages':
-                        languages = self.list_debug_languages()
-                        print("Supported debug languages:")
-                        for lang in languages:
-                            print(f"  - {lang}")
-
-                    elif user_input.startswith('debug:'):
-                        debug_parts = user_input.replace('debug:', '').strip().split(' ', 1)
-                        if len(debug_parts) >= 2:
-                            language = debug_parts[0].strip()
-                            code = debug_parts[1].strip()
-                            
-                            result = self.debug_code(code, language)
-                            print(f"Debug results for {language}:")
-                            print(f"Syntax Valid: {'âœ…' if result.get('syntax_valid', False) else 'âŒ'}")  
-
-                            if result.get('syntax_errors'):
-                                for error in result['syntax_errors']:
-                                    print(f"Error: {error}")
-                            
-                            if result.get('execution_output'):
-                                print(f"Output: {result['execution_output']}")
-                            
-                            if result.get('fixed_code'):
-                                print(f"\nðŸ› ï¸  Fixed Code:")
-                                print(f"```{result.get('language', '')}")
-                                print(result['fixed_code'])
-                                print("```")    
-                        else:
-                            print("âŒ Usage: debug: [language] [code]")   
-                    else:
-                        print("âŒ Unknown debug command. Use 'debug:', 'debug interactive', or 'debug languages'")               
-                # Handle task execution commands
-                elif user_input.startswith('execute:'):
-                    task = user_input.replace('execute:', '').strip()
-                    self.run_task(task)
-                    print("Task executed")
-
-                # Handle file operations
-                elif user_input.startswith('file '):
-                    result = self.handle_file_command(user_input)
-                    print(result)
-                 # Handle app control commands
-                elif user_input.startswith('app '):
-                    result = self.handle_app_command(user_input)
-                    print(result)
-                else:
-                    print("Unknown command. Use 'generate code:' or 'execute:' or 'file' or 'debug'.")
-                
-            except Exception as e:
-                print(f"Error: {e}")
-
-def create_env_template():
-    """Create a template .env file if it doesn't exist"""
-    env_file = '.env'
-    if not os.path.exists(env_file):
-        with open(env_file, 'w') as f:
-            f.write("# Jarvis AI Configuration\n")
-            f.write("GROQ_API_KEY=your_groq_api_key_here\n")
-            f.write("GEMINI_API_KEY=your_gemini_api_key_here\n")
-
-def main():
-    """Main function to run JARVIS AI"""
-    create_env_template()
-    
-    try:
-        jarvis = JARVISAI()
-        
-        # Check if running with command line argument
-        if len(sys.argv) > 1:
-            mode = sys.argv[1].lower()
-
-            if mode == "execute" and len(sys.argv) > 2:
-                #Task execution mode
-                task = ' '.join(sys.argv[2:])
-                jarvis.run_task(task)
-                print("Task executed")
-
-            elif mode == "generate" and len(sys.argv) > 2:
-                # Code generation mode
-                prompt = ' '.join(sys.argv[2:])
-                result = jarvis.generate_code(prompt, save_to_file=True)
-                print(f"Generated {result['language'].upper()} code:")
-                print(result['code'])
-                if 'filepath' in result:
-                    print(f"Saved to: {result['filepath']}")    
-
-            elif mode == "languages":
-                # List supported languages
-                languages = jarvis.list_supported_languages()
-                print("Supported programming Languages:")
-                for lang in languages:
-                    print(f" - {lang}")
-
-            # Debug mode
-            elif mode == "debug" and len(sys.argv) > 2:
-                code = ' '.join(sys.argv[2:])
-                results = jarvis.debug_code(code)
-                print(f"Debug results:")
-                print(f"Syntax Valid: {'âœ…' if results.get('syntax_valid', False) else 'âŒ'}")
-                if results.get('syntax_errors'):
-                    for error in results['syntax_errors']:
-                        print(f"Error: {error}")
-                if results.get('execution_output'):
-                    print(f"Output: {results['execution_output']}")
-            
-            # Debug specific language mode
-            elif mode == "debug-lang" and len(sys.argv) > 3:
-                language = sys.argv[2]
-                code = ' '.join(sys.argv[3:])
-                results = jarvis.debug_code(code, language)
-                print(f"Debug results for {language}:")
-                print(f"Syntax Valid: {'âœ…' if results.get('syntax_valid', False) else 'âŒ'}")
-                if results.get('syntax_errors'):
-                    for error in results['syntax_errors']:
-                        print(f"Error: {error}")
-                if results.get('execution_output'):
-                    print(f"Output: {results['execution_output']}")
-            
-            # List debug languages
-            elif mode == "debug-languages":
-                languages = jarvis.list_debug_languages()
-                print("Supported debugging languages:")
-                for lang in languages:
-                    print(f"  - {lang}")
-
-            elif mode == "generate-content" and len(sys.argv) > 2:
-                # Content generation mode
-                topic = ' '.join(sys.argv[2:])
-                result = generate_content(topic)
-                if result and result.get("success"):
-                    print("Content generated and saved successfully.") 
-                    print(f"ðŸ“ File: {result['filepath']}")       
-                else:
-                    print("âŒ Content generation failed.")
-
-            elif mode == "file" and len(sys.argv) > 2:
-                # File operation mode
-                operation = sys.argv[2]
-                args = sys.argv[3:]
-                command = f"file {operation} {' '.join(args)}"
-                result = jarvis.handle_file_command(command)
-                print(result)
-
-            elif mode == "app" and len(sys.argv) > 2:
-                # App control mode
-                operation = sys.argv[2]
-                args = sys.argv[3:]
-                command = f"app {operation} {' '.join(args)}"
-                result = jarvis.handle_app_command(command)
-                print(result)
-            else:
-                print("usage:")
-                print("  python Automation.py execute 'your task'")
-                print("  python Automation.py generate 'your prompt'")
-                print("  python Automation.py debug 'your code'")
-                print("  python Automation.py debug-lang [language] 'your code'")
-                print("  python Automation.py debug-languages")
-                print("  python Automation.py generate-content 'your topic'")
-                print("  python Automation.py file [operation] [arguments...]")
-                print("  python Automation.py languages")
-                
-        else:
-            # Interactive mode
-            jarvis.interactive_mode()        
-         
-    except Exception as e:
-        print(f"âŒ Failed to initialize JARVIS AI: {e}")
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    project_root = Path(__file__).resolve().parents[2]
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
-    from ultron import main as ultron_main
-
-    sys.exit(ultron_main(["automation"] + sys.argv[1:]))
-
-
-

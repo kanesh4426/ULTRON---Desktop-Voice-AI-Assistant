@@ -6,8 +6,10 @@ import tempfile
 import re
 import json
 from typing import Dict, List, Tuple, Optional, Any
-from openai import OpenAI
 from dotenv import load_dotenv
+from app.models.generation_request import GenerationRequest
+from app.orchestration.workflow_runner import AssistantEngine
+from app.utils.config import AssistantConfig
 
 class MultiLanguageDebugger:
     """
@@ -100,17 +102,21 @@ class MultiLanguageDebugger:
     
     SUPPORTED_LANGUAGES = list(LANGUAGE_CONFIGS.keys())
     
-    def __init__(self):
+    def __init__(self, engine: AssistantEngine = None):
         """Initialize the multi-language debugger"""
-        load_dotenv()
-        self.api_key = os.getenv("GROQ_API_KEY")
-        if not self.api_key:
-            raise ValueError("GROQ_API_KEY not found in environment variables")
-            
-        self.client = OpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=self.api_key
-        )
+        if engine:
+            self.engine = engine
+        else:
+            load_dotenv()
+            config = AssistantConfig(
+                provider="groq",
+                model="llama-3.3-70b-versatile",
+                groq_api_key=os.getenv("GROQ_API_KEY"),
+                gemini_api_key=os.getenv("GEMINI_API_KEY"),
+                huggingface_api_key=os.getenv("HUGGINGFACE_API_KEY"),
+                openrouter_api_key=os.getenv("OPENROUTER_API_KEY")
+            )
+            self.engine = AssistantEngine(config)
     
     @staticmethod
     def detect_language(code: str) -> str:
@@ -529,18 +535,16 @@ class MultiLanguageDebugger:
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": f"You are an expert {language} debugger. Fix code errors and provide clear explanations."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000,
-                temperature=0.3,
-                top_p=0.9
+            full_prompt = f"You are an expert {language} debugger. Fix code errors and provide clear explanations.\n\n{prompt}"
+            req = GenerationRequest(
+                user_input=full_prompt,
+                task_type="coding"
             )
             
-            return response.choices[0].message.content.strip()
+            response = self.engine.generate(req)
+            if response.get("success"):
+                return response.get("response", "").strip()
+            return f"AI Debugging failed: {response.get('response', 'Unknown error')}"
             
         except Exception as e:
             return f"AI Debugging failed: {str(e)}"

@@ -2,33 +2,42 @@ import os
 import re
 import datetime
 from typing import Optional, Dict, Any
-from openai import OpenAI
+from app.models.generation_request import GenerationRequest
+from app.orchestration.workflow_runner import AssistantEngine
+from app.utils.config import AssistantConfig
 
 class CodeGenerator:
     """
     AI-Powered Multi-Language Code Generator
-    Handles code generation for various programming languages using Groq API.
+    Handles code generation for various programming languages using AssistantEngine (Multi-LLM).
     """
     
-    def __init__(self, api_key: str):
+    def __init__(self, engine: AssistantEngine = None, api_key: str = None):
         """
         Initialize the Code Generator
         
         Args:
-            api_key (str): Groq API key for code generation
+            engine (AssistantEngine, optional): The orchestration engine
+            api_key (str, optional): Groq API key for code generation fallback
         """
-        self.code_client = OpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=api_key
-        )
+        if engine:
+            self.engine = engine
+        else:
+            config = AssistantConfig(
+                provider="groq",
+                model="llama-3.3-70b-versatile",
+                groq_api_key=api_key or os.getenv("GROQ_API_KEY"),
+                gemini_api_key=os.getenv("GEMINI_API_KEY"),
+                huggingface_api_key=os.getenv("HUGGINGFACE_API_KEY"),
+                openrouter_api_key=os.getenv("OPENROUTER_API_KEY")
+            )
+            self.engine = AssistantEngine(config)
+            
         self.setup_code_generation_context()
         
     def setup_code_generation_context(self):
         """Setup the conversation context for code generation"""
-        self.messages = [
-            {
-                "role": "system", 
-                "content": """You are an expert code generator that writes high-quality code in multiple programming languages.
+        self.system_prompt = """You are an expert code generator that writes high-quality code in multiple programming languages.
 
 SUPPORTED LANGUAGES:
 - Python (primary for automation)
@@ -53,30 +62,15 @@ GUIDELINES:
 5. For system automation tasks, prefer Python
 6. Include example usage when appropriate
 7. Validate input parameters and handle errors
-"""
-            },
-            {
-                "role": "system", 
-                "content": "IMPORTANT: When asked to write code, always specify the programming language using correct code block format. If no language is specified, default to Python."
-            },
-            # Examples for different languages
-            {
-                "role": "user", 
-                "content": "Write a Python function to calculate factorial"
-            },
-            {
-                "role": "assistant", 
-                "content": "```python\ndef factorial(n):\n    \"\"\"Calculate factorial of a number\"\"\"\n    if n == 0 or n == 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Example usage\nprint(factorial(5))  # Output: 120\n```"
-            },
-            {
-                "role": "user", 
-                "content": "Create a JavaScript class for a Car with make, model, and year"
-            },
-            {
-                "role": "assistant", 
-                "content": "```javascript\nclass Car {\n    constructor(make, model, year) {\n        this.make = make;\n        this.model = model;\n        this.year = year;\n    }\n    \n    getInfo() {\n        return `${this.year} ${this.make} ${this.model}`;\n    }\n    \n    // Example usage\n    // const myCar = new Car('Toyota', 'Camry', 2023);\n    // console.log(myCar.getInfo());\n}\n```"
-            }
-        ]
+
+IMPORTANT: When asked to write code, always specify the programming language using correct code block format. If no language is specified, default to Python.
+
+Examples:
+User: Write a Python function to calculate factorial
+Assistant: ```python\ndef factorial(n):\n    \"\"\"Calculate factorial of a number\"\"\"\n    if n == 0 or n == 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Example usage\nprint(factorial(5))  # Output: 120\n```
+
+User: Create a JavaScript class for a Car with make, model, and year
+Assistant: ```javascript\nclass Car {\n    constructor(make, model, year) {\n        this.make = make;\n        this.model = model;\n        this.year = year;\n    }\n    \n    getInfo() {\n        return `${this.year} ${this.make} ${this.model}`;\n    }\n}\n```"""
     
     def generate_code(self, prompt: str, language: str = None) -> Dict[str, str]:
         """
@@ -95,15 +89,15 @@ GUIDELINES:
             if language:
                 user_prompt = f"Write {language} code for: {prompt}"
             
-            response = self.code_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=self.messages + [{"role": "user", "content": user_prompt}],
-                max_tokens=2000,
-                temperature=0.7,
-                top_p=0.9
-            )
+            full_prompt = f"{self.system_prompt}\n\nUser: {user_prompt}"
             
-            full_response = response.choices[0].message.content.strip()
+            req = GenerationRequest(
+                user_input=full_prompt,
+                task_type="coding"
+            )
+            response = self.engine.generate(req)
+            
+            full_response = response.get("response", "").strip() if response.get("success") else str(response)
             code_info = self.extract_code_from_response(full_response)
             
             return {
@@ -155,7 +149,7 @@ GUIDELINES:
                 
         return None
     
-    def save_code_to_file(self, code: str, language: str, filename: str = None) -> str:
+    def save_code_to_file(self, code: str, language: str, filename: str = None, workspace_dir: str = "data") -> str:
         """
         Save generated code to appropriate file with proper extension
         
@@ -163,6 +157,7 @@ GUIDELINES:
             code (str): The generated code
             language (str): Programming language
             filename (str, optional): Custom filename
+            workspace_dir (str, optional): Base directory to save code
             
         Returns:
             str: Path to the saved file
@@ -193,8 +188,9 @@ GUIDELINES:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"generated_code_{timestamp}{extension}"
         
-        os.makedirs("data/generated_code", exist_ok=True)
-        filepath = os.path.join("data/generated_code", filename)
+        save_dir = os.path.join(workspace_dir, "generated_code")
+        os.makedirs(save_dir, exist_ok=True)
+        filepath = os.path.join(save_dir, filename)
         
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(code)

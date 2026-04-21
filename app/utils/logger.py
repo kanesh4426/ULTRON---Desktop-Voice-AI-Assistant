@@ -1,5 +1,11 @@
 import logging
+import os
 from pathlib import Path
+
+class LazyDirectoryFileHandler(logging.FileHandler):
+    def _open(self):
+        Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
+        return super()._open()
 
 
 def get_logger(name: str, log_file: str = "data/logs/assistant.log") -> logging.Logger:
@@ -8,8 +14,7 @@ def get_logger(name: str, log_file: str = "data/logs/assistant.log") -> logging.
     if logger.handlers:
         return logger
 
-    Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh = LazyDirectoryFileHandler(log_file, encoding="utf-8", delay=True)
     sh = logging.StreamHandler()
     fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
     fh.setFormatter(fmt)

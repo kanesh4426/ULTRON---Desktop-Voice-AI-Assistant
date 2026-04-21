@@ -27,20 +27,31 @@ class FileManager:
         self.guard = WorkspaceGuard(config.workspace_root)
 
         workspace = Path(config.workspace_root).expanduser().resolve()
-        system_dir = workspace / ".jarvis_file_access"
-        system_dir.mkdir(parents=True, exist_ok=True)
+        self._system_dir = workspace / ".ultron_file_access"
 
-        self.log_file = Path(config.log_file) if config.log_file else system_dir / "operations.log"
-        self.history = OperationHistory(
-            Path(config.history_file) if config.history_file else system_dir / "history.jsonl"
-        )
+        self.log_file = Path(config.log_file) if config.log_file else self._system_dir / "operations.log"
+        self.history_file = Path(config.history_file) if config.history_file else self._system_dir / "history.jsonl"
 
         self.logger = logging.getLogger(f"{__name__}.FileManager")
         self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:
-            fh = logging.FileHandler(self.log_file, encoding="utf-8")
-            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-            self.logger.addHandler(fh)
+        self._logger_initialized = False
+        self._history = None
+
+    @property
+    def history(self):
+        if self._history is None:
+            self._system_dir.mkdir(parents=True, exist_ok=True)
+            self._history = OperationHistory(self.history_file)
+        return self._history
+
+    def _ensure_logger(self):
+        if not self._logger_initialized:
+            if not self.logger.handlers:
+                self.log_file.parent.mkdir(parents=True, exist_ok=True)
+                fh = logging.FileHandler(self.log_file, encoding="utf-8")
+                fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+                self.logger.addHandler(fh)
+            self._logger_initialized = True
 
     def create_file(self, file_path: str, content: str = "", overwrite: bool = False) -> Dict[str, Any]:
         return self._run("create_file", lambda: self._create_file(file_path, content, overwrite), file_path)
@@ -379,6 +390,7 @@ class FileManager:
         target: Optional[str],
         details: Dict[str, Any],
     ) -> None:
+        self._ensure_logger()
         self.logger.info(
             "operation=%s success=%s path=%s target=%s message=%s",
             operation,

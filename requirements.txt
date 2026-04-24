@@ -12,7 +12,9 @@ openai
 edge-tts
 
 # [rag]
+chromadb
 sentence-transformers
+tiktoken
 scikit-learn
 
 # [automation]

@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Mic, MicOff, Send, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createId } from '../lib/app-utils';
+import { usePyBridge } from '../hooks/usePyBridge';
 
 interface Message {
   id: string;
@@ -14,6 +15,7 @@ interface Message {
 }
 
 export function ChatInterface() {
+  const { isConnected, sendMessageToPy } = usePyBridge();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -28,7 +30,6 @@ export function ChatInterface() {
   const [recognition, setRecognition] = useState<any>(null);
   const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const responseTimerIdsRef = useRef<number[]>([]);
 
   useEffect(() => {
     // Initialize speech recognition
@@ -77,33 +78,7 @@ export function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    return () => {
-      responseTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId));
-      responseTimerIdsRef.current = [];
-    };
-  }, []);
-
-  const generateAIResponse = (userMessage: string): string => {
-    // Mock AI responses based on keywords
-    const lowerMessage = userMessage.toLowerCase();
-    
-    if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-      return "Hello! It's great to chat with you. What would you like to talk about?";
-    } else if (lowerMessage.includes('weather')) {
-      return "I'd love to help with weather information! In a full implementation, I'd connect to a weather API to give you current conditions.";
-    } else if (lowerMessage.includes('time')) {
-      return `The current time is ${new Date().toLocaleTimeString()}.`;
-    } else if (lowerMessage.includes('help')) {
-      return "I'm here to help! You can ask me questions, have a conversation, or try using the voice feature by clicking the microphone button.";
-    } else if (lowerMessage.includes('voice') || lowerMessage.includes('speak')) {
-      return "Yes, I can speak! Click the speaker button next to my messages to hear them read aloud.";
-    } else {
-      return "That's interesting! I'm a mock AI assistant, so my responses are limited, but I'm here to demonstrate the chat and voice features.";
-    }
-  };
-
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const textToSend = inputText.trim();
     if (!textToSend) return;
 
@@ -115,21 +90,34 @@ export function ChatInterface() {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    setInputText('');
 
-    // Generate AI response
-    const responseTimerId = window.setTimeout(() => {
+    if (!isConnected) {
+      toast.error('Not connected to the Python backend.');
+      return;
+    }
+
+    try {
+      const response = await sendMessageToPy(textToSend);
+      let responseText = response;
+      try {
+        const parsed = JSON.parse(response);
+        responseText = parsed.response || response;
+      } catch (e) {
+        // Not JSON
+      }
+
       const aiResponse: Message = {
         id: createId(),
-        text: generateAIResponse(textToSend),
+        text: responseText,
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
-      responseTimerIdsRef.current = responseTimerIdsRef.current.filter((timerId) => timerId !== responseTimerId);
-    }, 1000);
-    responseTimerIdsRef.current.push(responseTimerId);
-
-    setInputText('');
+    } catch (error) {
+      console.error(error);
+      toast.error('Unable to reach the Python backend.');
+    }
   };
 
   const handleVoiceInput = () => {

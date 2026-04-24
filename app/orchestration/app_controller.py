@@ -7,6 +7,8 @@ from app.models.generation_request import GenerationRequest
 from app.orchestration.workflow_runner import AssistantEngine
 from app_access.manager import AppManager
 from app.services.chat_service import ChatService
+from app.services.context_assembler import ContextAssembler
+from app.services.token_manager import TokenManager
 from app.utils.config import AssistantConfig
 
 
@@ -24,6 +26,8 @@ class AppController:
         self.config = config or AssistantConfig.from_env()
         self.engine = AssistantEngine(self.config)
         self.chat = chat_service or ChatService()
+        self.token_manager = TokenManager()
+        self.context_assembler = ContextAssembler(self.chat, self.engine, self.token_manager)
         self.system_apps = AppManager()
 
     # --- Chat management -------------------------------------------------
@@ -73,8 +77,11 @@ class AppController:
         if conversation_id is None:
             return self._error_response("Failed to store conversation")
 
+        # Build the final prompt with context
+        final_prompt = self.context_assembler.build_prompt(text)
+
         req = GenerationRequest(
-            user_input=text,
+            user_input=final_prompt,
             template_name=template_name,
             template_vars=template_vars or {},
             use_rag=use_rag,

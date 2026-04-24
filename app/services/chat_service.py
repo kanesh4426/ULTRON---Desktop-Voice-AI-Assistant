@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import datetime
+import os
 from typing import Any, Dict, List
 
+import chromadb
+from chromadb.utils import embedding_functions
 from app.services.chat_db import ChatDatabase
 
 
@@ -14,6 +18,20 @@ class ChatService:
         self.db = db or ChatDatabase()
         self.current_chat_id: int | None = None
         self._ensure_default_chat()
+
+        # Initialize ChromaDB Vector Store for RAG
+        vector_store_path = os.path.join(os.getcwd(), "data", "vector_store")
+        os.makedirs(vector_store_path, exist_ok=True)
+        self.chroma_client = chromadb.PersistentClient(path=vector_store_path)
+        
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="ultron_messages",
+            embedding_function=self.embedding_fn
+        )
 
     def _ensure_default_chat(self) -> None:
         chats = self.db.get_all_chats()
@@ -59,7 +77,65 @@ class ChatService:
             self._ensure_default_chat()
         if not self.current_chat_id:
             return None
-        return self.db.add_conversation(self.current_chat_id, text)
+        conv_id = self.db.add_conversation(self.current_chat_id, text)
+        
+        # Save & Embed to ChromaDB
+        if conv_id:
+            try:
+                self.collection.add(
+                    documents=[text],
+                    metadatas=[{
+                        "message_id": conv_id,
+                        "chat_id": self.current_chat_id,
+                        "sender": "user",
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }],
+                    ids=[f"conv_{conv_id}_user"]
+                )
+            except Exception as e:
+                print(f"Vector store error (user msg): {e}")
+                
+        return conv_id
 
     def add_assistant_response(self, conversation_id: int, response: str, content_type: str) -> bool:
-        return self.db.update_assistant_response(conversation_id, response, content_type)
+        success = self.db.update_assistant_response(conversation_id, response, content_type)
+        if success:
+            try:
+                chat_id = self.current_chat_id or 0
+                self.collection.add(
+                    documents=[response],
+                    metadatas=[{
+                        "message_id": conversation_id,
+                        "chat_id": chat_id,
+                        "sender": "assistant",
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }],
+                    ids=[f"conv_{conversation_id}_assistant"]
+                )
+            except Exception as e:
+                print(f"Vector store error (assistant resp): {e}")
+        return success
+
+    def search_past_context(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve top-k similar past messages using semantic search."""
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=top_k
+            )
+            
+            context_messages = []
+            if results and results.get('documents') and results['documents'][0]:
+                for i in range(len(results['documents'][0])):
+                    doc = results['documents'][0][i]
+                    meta = results['metadatas'][0][i]
+                    dist = results['distances'][0][i] if 'distances' in results else None
+                    context_messages.append({
+                        "text": doc,
+                        "metadata": meta,
+                        "distance": dist
+                    })
+            return context_messages
+        except Exception as e:
+            print(f"Semantic search error: {e}")
+            return []

@@ -85,6 +85,12 @@ class ChatDatabase:
                 cursor.execute(
                     "ALTER TABLE conversations ADD COLUMN content_type VARCHAR(50) DEFAULT 'normal'"
                 )
+            # Add summary column to chats table if it doesn't exist
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name='chats' AND column_name='summary'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE chats ADD COLUMN summary TEXT"
+                )
                 conn.commit()
             conn.close()
         except psycopg2.Error:
@@ -208,6 +214,37 @@ class ChatDatabase:
                 WHERE id = (SELECT chat_id FROM conversations WHERE id = %s)
                 """,
                 (conversation_id,),
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except psycopg2.Error:
+            return False
+
+    def get_chat_summary(self, chat_id: int) -> Optional[str]:
+        """Retrieves the summary for a given chat."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT summary FROM chats WHERE id = %s", (chat_id,))
+            result = cursor.fetchone()
+            conn.close()
+            return result["summary"] if result else None
+        except psycopg2.Error:
+            return None
+
+    def update_chat_summary(self, chat_id: int, summary: str) -> bool:
+        """Updates the summary for a given chat."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE chats
+                SET summary = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (summary, chat_id),
             )
             conn.commit()
             conn.close()

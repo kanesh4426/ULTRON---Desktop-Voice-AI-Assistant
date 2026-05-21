@@ -68,8 +68,12 @@ class FileManager:
     def delete_file(self, file_path: str, confirm: bool = False) -> Dict[str, Any]:
         return self._run("delete_file", lambda: self._delete_file(file_path, confirm), file_path)
 
+    def rename_path(self, source_path: str, new_name: str) -> Dict[str, Any]:
+        return self._run("rename_path", lambda: self._rename_path(source_path, new_name), source_path, new_name)
+
     def rename_file(self, source_path: str, new_name: str) -> Dict[str, Any]:
-        return self._run("rename_file", lambda: self._rename_file(source_path, new_name), source_path, new_name)
+        # Keep for backward compatibility
+        return self.rename_path(source_path, new_name)
 
     def move_file(self, source_path: str, destination_path: str) -> Dict[str, Any]:
         return self._run("move_file", lambda: self._move_file(source_path, destination_path), source_path, destination_path)
@@ -110,6 +114,20 @@ class FileManager:
         return self._run(
             "search_files",
             lambda: self._search_files(pattern, search_path, recursive, extension_filter),
+            search_path,
+        )
+
+    def search_content(
+        self,
+        keyword: str,
+        search_path: str = ".",
+        recursive: bool = True,
+        extension_filter: Optional[List[str]] = None,
+        case_sensitive: bool = False,
+    ) -> Dict[str, Any]:
+        return self._run(
+            "search_content",
+            lambda: self._search_content(keyword, search_path, recursive, extension_filter, case_sensitive),
             search_path,
         )
 
@@ -179,9 +197,7 @@ class FileManager:
         target = self.guard.resolve_path(file_path)
         if target.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {file_path}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return {"path": str(target), "size": target.stat().st_size, "message": f"Created file: {target.name}"}
+        return self._write_file(file_path, content, "utf-8", append=False)
 
     def _read_file(self, file_path: str, encoding: str) -> Dict[str, Any]:
         target = self.guard.resolve_path(file_path, must_exist=True)
@@ -214,16 +230,22 @@ class FileManager:
         target.unlink()
         return {"path": str(target), "message": f"Deleted file: {target.name}"}
 
-    def _rename_file(self, source_path: str, new_name: str) -> Dict[str, Any]:
+    def _rename_path(self, source_path: str, new_name: str) -> Dict[str, Any]:
         source = self.guard.resolve_path(source_path, must_exist=True)
-        if not source.is_file():
-            raise IsADirectoryError(f"Not a file: {source_path}")
         if "/" in new_name or "\\" in new_name:
-            raise ValueError("new_name must be a file name, not a path")
+            raise ValueError("new_name must be a name, not a path")
         destination = source.with_name(new_name)
         self.guard._ensure_inside_workspace(destination)
         source.rename(destination)
-        return {"source": str(source), "destination": str(destination), "message": f"Renamed to {new_name}"}
+        return {
+            "source": str(source),
+            "destination": str(destination),
+            "message": f"Renamed {'file' if source.is_file() else 'folder'} to {new_name}",
+        }
+
+    def _rename_file(self, source_path: str, new_name: str) -> Dict[str, Any]:
+        # Deprecated: use _rename_path
+        return self._rename_path(source_path, new_name)
 
     def _move_file(self, source_path: str, destination_path: str) -> Dict[str, Any]:
         source = self.guard.resolve_path(source_path, must_exist=True)
@@ -323,6 +345,58 @@ class FileManager:
                 }
             )
         return {"path": str(directory), "pattern": pattern, "count": len(matches), "matches": matches}
+
+    def _search_content(
+        self,
+        keyword: str,
+        search_path: str,
+        recursive: bool,
+        extension_filter: Optional[List[str]],
+        case_sensitive: bool,
+    ) -> Dict[str, Any]:
+        directory = self.guard.resolve_path(search_path, must_exist=True)
+        if not directory.is_dir():
+            raise NotADirectoryError(f"Not a directory: {search_path}")
+
+        normalized_exts = self._normalize_extension_filter(extension_filter)
+        candidates = directory.rglob("*") if recursive else directory.iterdir()
+        matches: List[Dict[str, Any]] = []
+        search_term = keyword if case_sensitive else keyword.lower()
+
+        for item in candidates:
+            if not item.is_file():
+                continue
+            if normalized_exts and item.suffix.lower() not in normalized_exts:
+                continue
+
+            try:
+                # Basic content check; avoids loading huge files if possible
+                # But for simple implementation, we read text
+                if item.stat().st_size > self.config.max_read_bytes:
+                    continue
+
+                content = item.read_text(encoding="utf-8")
+                if not case_sensitive:
+                    content = content.lower()
+
+                if search_term in content:
+                    # Find line numbers
+                    lines = item.read_text(encoding="utf-8").splitlines()
+                    for i, line in enumerate(lines):
+                        match_line = line if case_sensitive else line.lower()
+                        if search_term in match_line:
+                            matches.append(
+                                {
+                                    "name": item.name,
+                                    "path": str(item),
+                                    "line": i + 1,
+                                    "content": line.strip(),
+                                }
+                            )
+            except (UnicodeDecodeError, OSError):
+                continue
+
+        return {"path": str(directory), "keyword": keyword, "count": len(matches), "matches": matches}
 
     def _get_metadata(self, path: str) -> Dict[str, Any]:
         target = self.guard.resolve_path(path)

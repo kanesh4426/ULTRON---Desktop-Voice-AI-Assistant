@@ -5,6 +5,7 @@ httpx
 numpy
 psutil
 PySide6
+bcrypt
 
 # AI & Providers
 google-generativeai

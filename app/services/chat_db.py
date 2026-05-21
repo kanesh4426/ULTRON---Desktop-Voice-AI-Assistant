@@ -5,6 +5,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
+import bcrypt
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -30,6 +31,17 @@ class ChatDatabase:
             try:
                 conn = self.get_connection()
                 cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password VARCHAR(255) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS chats (
@@ -220,6 +232,63 @@ class ChatDatabase:
             return True
         except psycopg2.Error:
             return False
+
+    # --- Authentication Methods ---
+
+    def create_user(self, name: str, email: str, password: str) -> tuple[bool, str]:
+        try:
+            hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            # Check if user already exists
+            cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+            if cursor.fetchone():
+                conn.close()
+                return False, "Account with this email already exists"
+            
+            cursor.execute(
+                "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
+                (name, email, hashed_pw)
+            )
+            conn.commit()
+            conn.close()
+            print(f"[ChatDatabase] ✅ Successfully created user: {email}")
+            return True, "Account created successfully"
+        except psycopg2.Error as e:
+            print(f"[ChatDatabase] ❌ PostgreSQL Error during signup: {e}")
+            return False, f"Database error: {str(e)}"
+        except Exception as e:
+            print(f"[ChatDatabase] ❌ General Error during signup: {e}")
+            return False, f"Error: {str(e)}"
+
+    def verify_user(self, email: str, password: str) -> tuple[bool, str, str]:
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, password FROM users WHERE email = %s", (email,))
+            user = cursor.fetchone()
+            conn.close()
+            
+            if not user:
+                print(f"[ChatDatabase] ⚠️ Login failed: User not found for {email}")
+                return False, "", "Invalid email or password"
+                
+            db_hashed_pw = user["password"]
+            user_name = user["name"]
+            
+            if bcrypt.checkpw(password.encode('utf-8'), db_hashed_pw.encode('utf-8')):
+                print(f"[ChatDatabase] ✅ Login successful for {email}")
+                return True, user_name, "Login successful"
+            else:
+                print(f"[ChatDatabase] ⚠️ Login failed: Invalid password for {email}")
+                return False, "", "Invalid email or password"
+        except psycopg2.Error as e:
+            print(f"[ChatDatabase] ❌ PostgreSQL Error during login: {e}")
+            return False, "", f"Database error: {str(e)}"
+        except Exception as e:
+            print(f"[ChatDatabase] ❌ General Error during login: {e}")
+            return False, "", f"Error: {str(e)}"
 
     def get_chat_summary(self, chat_id: int) -> Optional[str]:
         """Retrieves the summary for a given chat."""

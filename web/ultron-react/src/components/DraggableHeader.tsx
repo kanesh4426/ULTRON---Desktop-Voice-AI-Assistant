@@ -1,13 +1,13 @@
 import React, { useRef } from 'react';
 import { toast } from 'sonner';
-import { usePyBridge } from '../hooks/usePyBridge';
+import { usePyBridgeContext } from '../hooks/usePyBridge';
 
 /**
  * Example Draggable Header Component.
  * Drop this into your UI so you can move the frameless window.
  */
 export function DraggableHeader() {
-  const { isConnected, sendMessageToPy } = usePyBridge();
+  const { isConnected, sendMessageToPy } = usePyBridgeContext();
   const draggingRef = useRef(false);
   const startPosRef = useRef({ x: 0, y: 0 });
 

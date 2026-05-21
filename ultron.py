@@ -27,12 +27,6 @@ def _run_ui(_: List[str]) -> int:
     return int(ui_main() or 0)
 
 
-def _run_pyside_ui(_: List[str]) -> int:
-    from ui.pyside.main_window import run_ultron_pyside
-
-    return int(run_ultron_pyside() or 0)
-
-
 def _run_ingest(_: List[str]) -> int:
     from scripts.ingest_docs import main as ingest_main
 
@@ -89,7 +83,6 @@ def _run_debugger(_: List[str]) -> int:
 
 COMMANDS: Dict[str, Tuple[str, Callable[[List[str]], int]]] = {
     "ui": ("Launch the main desktop UI", _run_ui),
-    "pyside-ui": ("Launch the PySide UI directly", _run_pyside_ui),
     "ingest": ("Ingest documents into the RAG index", _run_ingest),
     "example": ("Run the CLI usage example", _run_example),
     "pyside-demo": ("Run the streaming PySide demo", _run_pyside_demo),

@@ -6,10 +6,12 @@ import sys
 # This is crucial to ensure the setting is applied correctly.
 os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9222"
 
+import json
 import datetime
+import traceback
 from typing import List, Dict, Any, Optional
 
-from PySide6.QtCore import Qt, QObject, Slot, QUrl
+from PySide6.QtCore import Qt, QObject, Slot, QUrl, Signal, QThread, QFile, QIODevice, QTextStream
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineScript
 
 from app.orchestration.app_controller import AppController
 from app.services.tts import SpeakJARVIS as SpeakUltron
@@ -104,34 +107,144 @@ class UltronController:
     def test_connection(self) -> Dict[str, Any]:
         return self.app.test_connection()
 
+    # --- Authentication --------------------------------------------------
+
+    def login_user(self, email: str, password: str) -> tuple[bool, str, str]:
+        try:
+            # Route through ChatService to reach ChatDatabase
+            if hasattr(self.app, 'chat') and hasattr(self.app.chat, 'db') and hasattr(self.app.chat.db, 'verify_user'):
+                return self.app.chat.db.verify_user(email, password)
+            
+            # Temporary Mock fallback (replace this once DB method is added)
+            print("[WARNING] verify_user not found in DB. Using mock auth.")
+            if password: 
+                return True, email.split('@')[0].capitalize(), "Login successful"
+            return False, "", "Invalid credentials"
+        except Exception as e:
+            print(f"❌ [UltronController] Crash during login_user:", flush=True)
+            traceback.print_exc()
+            return False, "", f"DB Error: {str(e)}"
+            
+    def signup_user(self, name: str, email: str, password: str) -> tuple[bool, str]:
+        try:
+            if hasattr(self.app, 'chat') and hasattr(self.app.chat, 'db') and hasattr(self.app.chat.db, 'create_user'):
+                result = self.app.chat.db.create_user(name, email, password)
+                # Handle cases where the DB method returns a boolean instead of a tuple
+                if isinstance(result, tuple) and len(result) >= 2:
+                    return bool(result[0]), str(result[1])
+                if result is None:
+                    return False, "Account creation failed (DB returned None)"
+                return bool(result), "Account created successfully"
+            
+            print("[WARNING] create_user not found in DB. Using mock auth.")
+            return True, "Account created successfully"
+        except Exception as e:
+            print(f"❌ [UltronController] Crash during signup_user:", flush=True)
+            traceback.print_exc()
+            return False, f"DB Error: {str(e)}"
+
+class MessageWorker(QThread):
+    resultReady = Signal(str, str)
+
+    def __init__(self, controller, req_id, message, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.req_id = req_id
+        self.message = message
+
+    def run(self):
+        print(f"[PyBridge] Worker received: {self.message}")
+        if self.message == "Status Check from React!":
+            health = self.controller.test_connection()
+            ok = health.get("ok", False)
+            response_text = f"Connection OK: {health.get('message', '')}" if ok else "Connection Failed"
+            res_json = json.dumps({"response": response_text, "content_type": "system"})
+        else:
+            try:
+                response = self.controller.send_user_message(self.message)
+                res_json = json.dumps(response)
+            except Exception as e:
+                res_json = json.dumps({"response": f"Error: {str(e)}", "content_type": "technical"})
+        self.resultReady.emit(self.req_id, res_json)
 
 class PyBridge(QObject):
     """
     Bridge object exposed to the React frontend via QWebChannel.
     """
+    messageReady = Signal(str, str)
+    loginReady = Signal(str)
+    signupReady = Signal(str)
+
     def __init__(self, controller: UltronController, window: QMainWindow, parent=None):
         super().__init__(parent)
         self.controller = controller
         self.window = window
+        self._workers = []
 
     @Slot(int, int)
     def move_window(self, x: int, y: int):
         # Move window based on React global drag calculation
         self.window.move(x, y)
 
-    @Slot(str, result=str)
-    def process_message(self, message: str) -> str:
-        if message == "Status Check from React!":
-            health = self.controller.test_connection()
-            ok = health.get("ok", False)
-            return f"Connection OK: {health.get('message', '')}" if ok else "Connection Failed"
-        
-        try:
-            response = self.controller.send_user_message(message)
-            return str(response.get("response", "No response content"))
-        except Exception as e:
-            return f"Error: {str(e)}"
+    @Slot()
+    def minimize_window(self):
+        if self.window:
+            self.window.showMinimized()
 
+    @Slot()
+    def maximize_window(self):
+        if self.window:
+            if self.window.isMaximized():
+                self.window.showNormal()
+            else:
+                self.window.showMaximized()
+
+    @Slot()
+    def close_window(self):
+        if self.window:
+            self.window.close()
+
+    @Slot(str, str)
+    def process_message(self, req_id: str, message: str):
+        worker = MessageWorker(self.controller, req_id, message, self)
+        worker.resultReady.connect(self.messageReady.emit)
+        self._workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._cleanup_worker(w))
+        worker.start()
+
+    def _cleanup_worker(self, worker):
+        if worker in self._workers:
+            self._workers.remove(worker)
+            
+    @Slot(str, str)
+    def login(self, email: str, password: str):
+        print(f"[PyBridge] Login attempt for {email}", flush=True)
+        try:
+            success, name, msg = self.controller.login_user(email, password)
+            self.loginReady.emit(
+                json.dumps({"success": success, "name": name, "message": msg})
+            )
+        except Exception as e:
+            print(f"❌ [PyBridge] Crash during login slot:", flush=True)
+            traceback.print_exc()
+            self.loginReady.emit(
+                json.dumps({"success": False, "name": "", "message": str(e)})
+            )
+
+    @Slot(str, str, str)
+    def signup(self, name: str, email: str, password: str):
+        print(f"[PyBridge] Signup attempt for {email}", flush=True)
+        try:
+            success, msg = self.controller.signup_user(name, email, password)
+            self.signupReady.emit(
+                json.dumps({"success": success, "message": msg})
+            )
+        except Exception as e:
+            print(f"❌ [PyBridge] Crash during signup slot:", flush=True)
+            traceback.print_exc()
+            self.signupReady.emit(
+                json.dumps({"success": False, "message": str(e)})
+            )
 
 class ReactMainWindow(QMainWindow):
     """
@@ -155,6 +268,20 @@ class ReactMainWindow(QMainWindow):
         self.channel.registerObject("pyBridge", self.bridge)
         self.web_view.page().setWebChannel(self.channel)
 
+        self.web_view.page().featurePermissionRequested.connect(self._handle_feature_permission)
+
+        # Fallback injection of qwebchannel.js
+        qwebchannel_file = QFile(":/qtwebchannel/qwebchannel.js")
+        if qwebchannel_file.open(QIODevice.ReadOnly):
+            source = QTextStream(qwebchannel_file).readAll()
+            qwebchannel_file.close()
+            script = QWebEngineScript()
+            script.setName("qwebchannel.js")
+            script.setSourceCode(source)
+            script.setInjectionPoint(QWebEngineScript.DocumentCreation)
+            script.setWorldId(QWebEngineScript.MainWorld)
+            self.web_view.page().scripts().insert(script)
+
         # --- Load React App ---
         # This logic helps debug the common "white screen" issue.
 
@@ -175,6 +302,10 @@ class ReactMainWindow(QMainWindow):
         print(f"[INFO] Loading React app from: {react_path}")
         self.web_view.load(QUrl.fromLocalFile(react_path))
 
+    def _handle_feature_permission(self, url: QUrl, feature: QWebEnginePage.Feature):
+        # Grant microphone access for React's SpeechRecognition API
+        if feature == QWebEnginePage.Feature.MediaAudioCapture:
+            self.web_view.page().setFeaturePermission(url, feature, QWebEnginePage.PermissionPolicy.PermissionGrantedByUser)
 
 class MessageWidget(QFrame):
     """

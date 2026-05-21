@@ -5,7 +5,7 @@ import { Input } from './ui/input';
 import { Mic, MicOff, Send, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createId } from '../lib/app-utils';
-import { usePyBridge } from '../hooks/usePyBridge';
+import { usePyBridgeContext } from '../hooks/usePyBridge';
 
 interface Message {
   id: string;
@@ -15,7 +15,7 @@ interface Message {
 }
 
 export function ChatInterface() {
-  const { isConnected, sendMessageToPy } = usePyBridge();
+  const { isConnected, sendMessageToPy } = usePyBridgeContext();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -207,6 +207,9 @@ export function ChatInterface() {
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Input
+              id="chat-input"
+              name="message"
+              aria-label="Message"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Type your message or use voice input..."

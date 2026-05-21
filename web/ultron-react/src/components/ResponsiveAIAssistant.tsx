@@ -13,10 +13,10 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Mic, MicOff, Send, Settings, Menu, X, MessageSquare, Zap, Volume2, User, History, Trash2, Download, Moon, Sun, Clock,Paperclip,Search,Pencil,Star } from 'lucide-react';
+import { Mic, MicOff, Send, Settings, Menu, X, MessageSquare, Zap, Volume2, User, History, Trash2, Download, Moon, Sun, Clock,Paperclip,Search,Pencil,Star, Minus, Square, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { createId, createInitials } from '../lib/app-utils';
-import { usePyBridge } from '../hooks/usePyBridge';
+import { usePyBridgeContext } from '../hooks/usePyBridge';
 
 type ContentType='normal'|'code'|'content'|'technical'|'system';
 
@@ -99,6 +99,48 @@ function writeLocalStorage(key: string, value: unknown) {
 }
 
 export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAIAssistantProps) {
+  const [isMaximized, setIsMaximized] = useState(false);
+  const draggingRef = useRef(false);
+  const startPosRef = useRef({ x: 0, y: 0 });
+
+  const handleMinimize = () => {
+    window.pyBridge?.minimize_window?.();
+  };
+
+  const handleMaximize = () => {
+    setIsMaximized(!isMaximized);
+    window.pyBridge?.maximize_window?.();
+  };
+
+  const handleClose = () => {
+    window.pyBridge?.close_window?.();
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isConnected || !window.pyBridge?.move_window) return;
+    
+    draggingRef.current = true;
+    startPosRef.current = { x: e.clientX, y: e.clientY };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!draggingRef.current) return;
+      
+      const globalX = moveEvent.screenX - startPosRef.current.x;
+      const globalY = moveEvent.screenY - startPosRef.current.y;
+      
+      (window as any).pyBridge?.move_window?.(globalX, globalY);
+    };
+
+    const handleMouseUp = () => {
+      draggingRef.current = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -119,7 +161,7 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
     message: 'Checking connection...',
     visible: false
   });
-  const { isConnected, sendMessageToPy } = usePyBridge();
+  const { isConnected, sendMessageToPy } = usePyBridgeContext();
   
   const [recognition, setRecognition] = useState<any>(null);
   const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
@@ -144,7 +186,6 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const connectionHideTimerRef = useRef<number | null>(null);
-  const responseTimerIdsRef = useRef<number[]>([]);
   const chatSessionsRef = useRef<ChatSession[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -241,7 +282,7 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = settings.language;
 
-      recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
+      recognitionInstance.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         setInputText(transcript);
         setIsListening(false);
@@ -278,13 +319,6 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  useEffect(() => {
-    return () => {
-      responseTimerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId));
-      responseTimerIdsRef.current = [];
-    };
-  }, []);
 
   useEffect(function () {
     function clearBannerTimer() {
@@ -327,34 +361,6 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
       clearBannerTimer();
     };
   }, []);
-
-  const generateAIResponse = (userMessage: string): string => {
-    const lowerMessage = userMessage.toLowerCase();
-    
-    if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-      return `Hello ${userProfile.name}! I'm your AI assistant. I'm here to help you with anything you need. How can I assist you today?`;
-    } else if (lowerMessage.includes('weather')) {
-      return "I'd love to help with weather information! In a full implementation, I'd connect to a weather API to give you current conditions for your location.";
-    } else if (lowerMessage.includes('time')) {
-      return `The current time is ${new Date().toLocaleTimeString()}.`;
-    } else if (lowerMessage.includes('help')) {
-      return "I'm here to help! You can ask me questions, have a conversation, or use voice input by tapping the microphone button. Try the Quick Actions for some ideas!";
-    } else if (lowerMessage.includes('joke')) {
-      return "Why did the AI go to therapy? Because it had too many deep learning issues! 😄";
-    } else if (lowerMessage.includes('ai') || lowerMessage.includes('artificial intelligence')) {
-      return "Artificial Intelligence (AI) is technology that enables computers to simulate human intelligence - learning from experience, understanding language, recognizing patterns, and making decisions. Think of it as teaching computers to think and learn like humans do!";
-    } else if (lowerMessage.includes('inspire') || lowerMessage.includes('quote')) {
-      return "Here's an inspiring quote: 'The future belongs to those who believe in the beauty of their dreams.' - Eleanor Roosevelt ✨";
-    } else if (lowerMessage.includes('productivity') || lowerMessage.includes('focus')) {
-      return "Here are some productivity tips: 1) Use the Pomodoro Technique (25 min work, 5 min break), 2) Prioritize your top 3 tasks each day, 3) Minimize distractions by turning off notifications, 4) Take regular breaks to recharge! 🎯";
-    } else if (lowerMessage.includes('fun fact') || lowerMessage.includes('fact')) {
-      return "Fun fact: Honey never spoils! Archaeologists have found 3,000-year-old honey in Egyptian tombs that was still perfectly edible. 🍯";
-    } else if (lowerMessage.includes('motivat')) {
-      return "You've got this! 💪 Every small step you take today brings you closer to your goals. Believe in yourself and keep moving forward. You're capable of amazing things! 🚀";
-    } else {
-      return "That's an interesting question! I'm a demo AI assistant with simulated responses, but I'm designed to show how voice and chat interactions work together. Try asking me about jokes, AI, inspiration, or use the Quick Actions menu!";
-    }
-  };
 
   const replaceChatSessions = (updater: (prev: ChatSession[]) => ChatSession[]) => {
     setChatSessions((prev) => {
@@ -595,30 +601,19 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
         }
       }
     } else {
-      // Fallback to mock text if not running inside the desktop app wrapper
-      const responseTimerId = window.setTimeout(() => {
-        const aiResponseText = generateAIResponse(textToSend);
-        const aiResponse: Message = {
-          id: createId(),
-          text: aiResponseText,
-          sender: 'ai',
-          contentType: inferContentType(aiResponseText),
-          timestamp: new Date()
-        };
-        const updatedMessages = [...getSessionMessages(sessionId), aiResponse];
-        updateCurrentSession(sessionId, updatedMessages);
-        if (currentSessionIdRef.current === sessionId) {
-          commitMessages(updatedMessages);
-        }
-
-        if (settings.voiceSettings.autoSpeak) {
-          handleSpeak(aiResponseText);
-        }
-
-        responseTimerIdsRef.current = responseTimerIdsRef.current.filter((timerId) => timerId !== responseTimerId);
-      }, 1000);
-
-      responseTimerIdsRef.current.push(responseTimerId);
+      // Not connected to the backend
+      const errorResponse: Message = {
+        id: createId(),
+        text: "Error: Not connected to the Python backend. Ensure the PySide6 wrapper is running.",
+        sender: 'ai',
+        contentType: 'system',
+        timestamp: new Date()
+      };
+      const updatedMessages = [...getSessionMessages(sessionId), errorResponse];
+      updateCurrentSession(sessionId, updatedMessages);
+      if (currentSessionIdRef.current === sessionId) {
+        commitMessages(updatedMessages);
+      }
     }
   };
 
@@ -728,188 +723,207 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
     };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-blue-900 via-cyan-800 to-blue-800 relative overflow-hidden">
-      {/* Background Effects */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-cyan-500/20 to-blue-700/20"></div>
-      <div className="absolute top-20 left-10 w-32 h-32 bg-cyan-400/10 rounded-full blur-xl"></div>
-      <div className="absolute bottom-20 right-10 w-40 h-40 bg-blue-400/10 rounded-full blur-xl"></div>
-      <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-cyan-300/10 rounded-full blur-lg"></div>
-
-      {connectionBanner.visible && (
-        <div className={"fixed top-4 right-4 z-50 px-4 py-2 rounded-full text-sm border shadow-lg backdrop-blur-lg " + connectionBannerStyles.container}>
-          {connectionBanner.message}
+    <div className="h-full bg-gradient-to-br from-blue-900 via-cyan-800 to-blue-800 relative overflow-hidden flex flex-col">
+      {/* Integrated Title Bar */}
+      <div className="flex items-center justify-between h-10 w-full bg-transparent text-gray-400 select-none z-50">
+        <div className="flex-1 h-full flex items-center pl-4 font-semibold text-sm text-gray-200 cursor-move" onMouseDown={handleMouseDown}>
+          U.L.T.R.O.N Assistant
         </div>
-      )}
-
-      {/* Mobile Sidebar Overlay */}
-      {showSidebar && (
-        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowSidebar(false)}>
-          <div className="absolute right-0 top-0 h-full w-80 bg-gray-900/95 backdrop-blur-lg border-l border-gray-700" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-white">Menu</h3>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => setShowSidebar(false)}
-                  className="text-white hover:bg-gray-800"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-              
-              <div className="space-y-3">
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start text-white hover:bg-gray-800"
-                  onClick={() => {
-                    setShowHistory(true);
-                    setShowSidebar(false);
-                  }}
-                >
-                  <History className="w-4 h-4 mr-3" />
-                  Chat History
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start text-white hover:bg-gray-800"
-                  onClick={() => {
-                    setShowQuickActions(!showQuickActions);
-                  }}
-                >
-                  <Zap className="w-4 h-4 mr-3" />
-                  Quick Actions
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start text-white hover:bg-gray-800"
-                  onClick={() => {
-                    setShowSettings(true);
-                    setShowSidebar(false);
-                  }}
-                >
-                  <Settings className="w-4 h-4 mr-3" />
-                  Settings
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start text-white hover:bg-gray-800"
-                  onClick={() => {
-                    setShowProfile(true);
-                    setShowSidebar(false);
-                  }}
-                >
-                  <User className="w-4 h-4 mr-3" />
-                  Profile
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Desktop Sidebar */}
-      <div className="hidden lg:block fixed left-0 top-0 h-full w-64 bg-gray-900/30 backdrop-blur-lg border-r border-gray-700/50 z-30">
-        <div className="p-6 flex flex-col h-full">
-          <div className="mb-8">
-            <h2 className="text-white mb-2">AI Assistant</h2>
-            <p className="text-cyan-300 text-sm">Your intelligent companion</p>
-          </div>
-          
-          <Button 
-            onClick={createNewSession}
-            className="w-full mb-6 bg-cyan-600 hover:bg-cyan-500 text-white border-0"
-          >
-            <MessageSquare className="w-4 h-4 mr-2" />
-            New Chat
-          </Button>
-          
-          <div className="space-y-3 flex-1 overflow-y-auto">
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start text-white hover:bg-gray-800/50"
-              onClick={() => setShowHistory(true)}
-            >
-              <History className="w-4 h-4 mr-3" />
-              Chat History
-            </Button>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start text-white hover:bg-gray-800/50"
-              onClick={() => setShowQuickActions(!showQuickActions)}
-            >
-              <Zap className="w-4 h-4 mr-3" />
-              Quick Actions
-            </Button>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start text-white hover:bg-gray-800/50"
-              onClick={() => setShowSettings(true)}
-            >
-              <Settings className="w-4 h-4 mr-3" />
-              Settings
-            </Button>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start text-white hover:bg-gray-800/50"
-              onClick={() => setShowProfile(true)}
-            >
-              <User className="w-4 h-4 mr-3" />
-              Profile
-            </Button>
-          </div>
-
-          <Separator className="my-4 bg-gray-700/50" />
-
-          <div className="flex items-center gap-3 mt-auto">
-            <Avatar>
-              <AvatarImage src={userProfile.avatar} />
-              <AvatarFallback className="bg-cyan-600 text-white">
-                {userProfile.initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-sm truncate">{userProfile.name}</p>
-              <p className="text-cyan-300 text-xs">Online</p>
-            </div>
-          </div>
+        <div className="flex h-full">
+          <button onClick={handleMinimize} className="flex items-center justify-center w-12 h-full hover:bg-white/10 hover:text-white transition-colors">
+            <Minus size={16} />
+          </button>
+          <button onClick={handleMaximize} className="flex items-center justify-center w-12 h-full hover:bg-white/10 hover:text-white transition-colors">
+            {isMaximized ? <Copy size={14} /> : <Square size={14} />}
+          </button>
+          <button onClick={handleClose} className="flex items-center justify-center w-12 h-full hover:bg-red-600 hover:text-white transition-colors">
+            <X size={16} />
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex flex-col h-full lg:ml-64">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 lg:p-6 relative z-20">
-          <div className="flex items-center gap-3">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="lg:hidden text-white hover:bg-white/10"
-              onClick={() => setShowSidebar(true)}
-            >
-              <Menu className="w-5 h-5" />
-            </Button>
-            <h1 className="text-white">AI Assistant</h1>
-            {currentSessionId && (
-              <Badge variant="outline" className="text-cyan-300 border-cyan-300/50 hidden sm:inline-flex">
-                Active Chat
-              </Badge>
-            )}
+      <div className="flex-1 relative overflow-hidden flex flex-col">
+        {/* Background Effects */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-cyan-500/20 to-blue-700/20"></div>
+        <div className="absolute top-20 left-10 w-32 h-32 bg-cyan-400/10 rounded-full blur-xl"></div>
+        <div className="absolute bottom-20 right-10 w-40 h-40 bg-blue-400/10 rounded-full blur-xl"></div>
+        <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-cyan-300/10 rounded-full blur-lg"></div>
+
+        {connectionBanner.visible && (
+          <div className={"fixed top-14 right-4 z-50 px-4 py-2 rounded-full text-sm border shadow-lg backdrop-blur-lg " + connectionBannerStyles.container}>
+            {connectionBanner.message}
           </div>
-          
-          <div className="flex items-center gap-2">
-            {showChat && (
+        )}
+
+        {/* Mobile Sidebar Overlay */}
+        {showSidebar && (
+          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowSidebar(false)}>
+            <div className="absolute right-0 top-0 h-full w-80 bg-gray-900/95 backdrop-blur-lg border-l border-gray-700" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-white">Menu</h3>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => setShowSidebar(false)}
+                    className="text-white hover:bg-gray-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
+                
+                <div className="space-y-3">
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start text-white hover:bg-gray-800"
+                    onClick={() => {
+                      setShowHistory(true);
+                      setShowSidebar(false);
+                    }}
+                  >
+                    <History className="w-4 h-4 mr-3" />
+                    Chat History
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start text-white hover:bg-gray-800"
+                    onClick={() => {
+                      setShowQuickActions(!showQuickActions);
+                    }}
+                  >
+                    <Zap className="w-4 h-4 mr-3" />
+                    Quick Actions
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start text-white hover:bg-gray-800"
+                    onClick={() => {
+                      setShowSettings(true);
+                      setShowSidebar(false);
+                    }}
+                  >
+                    <Settings className="w-4 h-4 mr-3" />
+                    Settings
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start text-white hover:bg-gray-800"
+                    onClick={() => {
+                      setShowProfile(true);
+                      setShowSidebar(false);
+                    }}
+                  >
+                    <User className="w-4 h-4 mr-3" />
+                    Profile
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block fixed left-0 top-10 bottom-0 w-64 bg-gray-900/30 backdrop-blur-lg border-r border-gray-700/50 z-30">
+          <div className="p-6 flex flex-col h-full">
+            <div className="mb-8">
+              <h2 className="text-white mb-2">AI Assistant</h2>
+              <p className="text-cyan-300 text-sm">Your intelligent companion</p>
+            </div>
+            
+            <Button 
+              onClick={createNewSession}
+              className="w-full mb-6 bg-cyan-600 hover:bg-cyan-500 text-white border-0"
+            >
+              <MessageSquare className="w-4 h-4 mr-2" />
+              New Chat
+            </Button>
+            
+            <div className="space-y-3 flex-1 overflow-y-auto">
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start text-white hover:bg-gray-800/50"
+                onClick={() => setShowHistory(true)}
+              >
+                <History className="w-4 h-4 mr-3" />
+                Chat History
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start text-white hover:bg-gray-800/50"
+                onClick={() => setShowQuickActions(!showQuickActions)}
+              >
+                <Zap className="w-4 h-4 mr-3" />
+                Quick Actions
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start text-white hover:bg-gray-800/50"
+                onClick={() => setShowSettings(true)}
+              >
+                <Settings className="w-4 h-4 mr-3" />
+                Settings
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start text-white hover:bg-gray-800/50"
+                onClick={() => setShowProfile(true)}
+              >
+                <User className="w-4 h-4 mr-3" />
+                Profile
+              </Button>
+            </div>
+
+            <Separator className="my-4 bg-gray-700/50" />
+
+            <div className="flex items-center gap-3 mt-auto">
+              <Avatar>
+                <AvatarImage src={userProfile.avatar} />
+                <AvatarFallback className="bg-cyan-600 text-white">
+                  {userProfile.initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm truncate">{userProfile.name}</p>
+                <p className="text-cyan-300 text-xs">Online</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex flex-col h-full lg:ml-64 relative">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 lg:p-6 relative z-20">
+            <div className="flex items-center gap-3">
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="text-white hover:bg-white/10"
-                onClick={createNewSession}
+                className="lg:hidden text-white hover:bg-white/10"
+                onClick={() => setShowSidebar(true)}
               >
-                <MessageSquare className="w-5 h-5" />
+                <Menu className="w-5 h-5" />
               </Button>
-            )}
+              <h1 className="text-white">AI Assistant</h1>
+              {currentSessionId && (
+                <Badge variant="outline" className="text-cyan-300 border-cyan-300/50 hidden sm:inline-flex">
+                  Active Chat
+                </Badge>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {showChat && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="text-white hover:bg-white/10"
+                  onClick={createNewSession}
+                >
+                  <MessageSquare className="w-5 h-5" />
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* Quick Actions Panel */}
         {showQuickActions && (
@@ -1040,7 +1054,7 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
                           ? 'bg-cyan-600/80 text-white' 
                           : 'bg-white/10 text-white border border-white/20'
                       }`}>
-                        {typeLabel && (
+                        {typeLabel && message.sender === 'ai' && (
                           <Badge className="mb-2 bg-white/10 text-white border-white/20">{typeLabel}</Badge>
                         )}
                         <div className="flex items-start justify-between gap-2">
@@ -1063,14 +1077,16 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
                         <p className="text-xs opacity-70 mt-2">
                           {message.timestamp.toLocaleTimeString()}
                         </p>
-                        <div className="flex items-center gap-1 mt-3">
-                          {[1,2,3,4,5].map((value) => (
-                            <button key={message.id + '-' + value} onClick={() => handleRateMessage(message.id, value)} className="h-6 w-6 flex items-center justify-center rounded-full hover:bg-white/10">
-                              <Star className={rating >= value ? 'h-4 w-4 fill-current text-yellow-300' : 'h-4 w-4 fill-current text-yellow-300/40'} />
-                            </button>
-                          ))}
-                          <span className="text-xs text-white/60 ml-2">{rating ? rating + '/5' : 'Rate'}</span>
-                        </div>
+                        {message.sender === 'ai' && (
+                          <div className="flex items-center gap-1 mt-3">
+                            {[1,2,3,4,5].map((value) => (
+                              <button key={message.id + '-' + value} onClick={() => handleRateMessage(message.id, value)} className="h-6 w-6 flex items-center justify-center rounded-full hover:bg-white/10">
+                                <Star className={rating >= value ? 'h-4 w-4 fill-current text-yellow-300' : 'h-4 w-4 fill-current text-yellow-300/40'} />
+                              </button>
+                            ))}
+                            <span className="text-xs text-white/60 ml-2">{rating ? rating + '/5' : 'Rate'}</span>
+                          </div>
+                        )}
                       </Card>
                     </div>
                   )})}
@@ -1151,6 +1167,7 @@ export function ResponsiveAIAssistant({ authenticatedUser = null }: ResponsiveAI
           </Card>
         </form>
       </div>
+    </div>
 
       {/* Settings Dialog */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
